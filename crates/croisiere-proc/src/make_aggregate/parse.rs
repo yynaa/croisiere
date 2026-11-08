@@ -61,6 +61,10 @@ pub enum TypeDef {
     },
     VecOf(Box<TypeDef>),
     SetOf(Box<TypeDef>),
+    OptionOf(Box<TypeDef>),
+    /// Any other type with generic arguments, e.g. `Status<Foo>`. Its wrapper
+    /// holds the whole type as written, so it cannot have a nested block.
+    Generic(Type),
 }
 
 /// The attributes allowed before a root.
@@ -163,10 +167,24 @@ fn parse_block(input: ParseStream) -> syn::Result<Vec<FieldDef>> {
 
 impl TypeDef {
     fn parse(input: ParseStream) -> syn::Result<Self> {
+        let name: Ident = input.fork().parse()?;
+        let is_container = matches!(name.to_string().as_str(), "Vec" | "HashSet" | "Option");
+        if input.peek2(Token![<]) && !is_container {
+            let ty: Type = input.parse()?;
+            if input.peek(syn::token::Brace) {
+                return Err(syn::Error::new_spanned(
+                    &ty,
+                    "a type with generic arguments cannot have a nested block",
+                ));
+            }
+            return Ok(Self::Generic(ty));
+        }
+
         let name: Ident = input.parse()?;
         match name.to_string().as_str() {
             "Vec" => Ok(Self::VecOf(Box::new(Self::parse_generic_arg(input)?))),
             "HashSet" => Ok(Self::SetOf(Box::new(Self::parse_generic_arg(input)?))),
+            "Option" => Ok(Self::OptionOf(Box::new(Self::parse_generic_arg(input)?))),
             _ => {
                 let body = if input.peek(syn::token::Brace) {
                     Some(parse_block(input)?)

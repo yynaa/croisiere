@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use proc_macro2::TokenStream;
-use quote::{format_ident, quote};
+use quote::{format_ident, quote, ToTokens};
 use syn::{Ident, Type};
 
 use super::parse::{NodeDef, TypeDef};
@@ -12,7 +12,7 @@ struct WrapperDef {
     /// Generated wrapper name, e.g. `AAggregateCD`.
     name: Ident,
     /// The original domain type held in `root`, or `None` for a `rootless` node.
-    original: Option<Ident>,
+    original: Option<TokenStream>,
     /// Wrapper fields: `(field name, field type)`.
     fields: Vec<(Ident, TokenStream)>,
     /// Set only on the top-level `<root>Aggregate` wrapper, which gets the
@@ -55,7 +55,8 @@ impl Generator {
                 event: root.event.clone(),
                 error: root.error.clone(),
             };
-            self.push(wrapper, Some(root.name.clone()), fields, Some(types));
+            let root_name = &root.name;
+            self.push(wrapper, Some(quote!(#root_name)), fields, Some(types));
         }
         self.expand()
     }
@@ -84,6 +85,10 @@ impl Generator {
                 let inner = self.resolve(inner, rootless, prefix, ancestors);
                 quote!(::std::collections::HashSet<#inner>)
             }
+            TypeDef::OptionOf(inner) => {
+                let inner = self.resolve(inner, rootless, prefix, ancestors);
+                quote!(::std::option::Option<#inner>)
+            }
             TypeDef::Named { name, body } => {
                 let mut path = ancestors.to_vec();
                 path.push(name.to_string());
@@ -96,8 +101,25 @@ impl Generator {
                         fields.push((field.name.clone(), child_ty));
                     }
                 }
-                let original = (!rootless).then(|| name.clone());
+                let original = (!rootless).then(|| quote!(#name));
                 self.push(wrapper.clone(), original, fields, None);
+                quote!(#wrapper)
+            }
+            TypeDef::Generic(ty) => {
+                // The wrapper name comes from the full type, so `Status<Foo>`
+                // and `Status<Bar>` get different wrappers.
+                let mut path = ancestors.to_vec();
+                let written = ty.to_token_stream().to_string();
+                path.push(
+                    written
+                        .chars()
+                        .filter(char::is_ascii_alphanumeric)
+                        .collect(),
+                );
+                let wrapper = format_ident!("{}{}", prefix, path.concat());
+
+                let original = (!rootless).then(|| quote!(#ty));
+                self.push(wrapper.clone(), original, Vec::new(), None);
                 quote!(#wrapper)
             }
         }
@@ -106,7 +128,7 @@ impl Generator {
     fn push(
         &mut self,
         name: Ident,
-        original: Option<Ident>,
+        original: Option<TokenStream>,
         fields: Vec<(Ident, TokenStream)>,
         aggregate: Option<AggregateTypes>,
     ) {

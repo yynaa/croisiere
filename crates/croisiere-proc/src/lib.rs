@@ -119,9 +119,24 @@ use syn::parse_macro_input;
 /// // pub struct AAggregateCD { pub root: D }
 /// ```
 ///
-/// Every comma is optional. Field types may also be `Vec<X>` or `HashSet<X>`,
-/// in which case the generated field type wraps the child aggregate
-/// accordingly.
+/// Every comma is optional. Field types may also be `Vec<X>`, `HashSet<X>` or
+/// `Option<X>`, in which case the generated field type wraps the child
+/// aggregate accordingly.
+///
+/// Any other generic type, such as a user enum `Status<Foo>`, is held as a
+/// whole: its wrapper has a `root` field of exactly that type and no nested
+/// fields.
+///
+/// ```ignore
+/// make_aggregate!(
+///     #[emits = AEvent]
+///     #[fails = AError]
+///     A { status: Status<Foo>, maybe: Option<B> }
+/// );
+/// // pub struct AAggregate { pub root: A, pub status: AAggregateStatusFoo, pub maybe: Option<AAggregateB> }
+/// // pub struct AAggregateStatusFoo { pub root: Status<Foo> }
+/// // pub struct AAggregateB { pub root: B }
+/// ```
 #[proc_macro]
 pub fn make_aggregate(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as make_aggregate::AggregateInput);
