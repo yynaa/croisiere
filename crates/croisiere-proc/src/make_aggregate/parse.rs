@@ -1,10 +1,12 @@
 //! Parsing of the `make_aggregate!` DSL.
 
-use quote::{format_ident, ToTokens};
+use proc_macro2::TokenStream;
+use quote::{format_ident, quote, ToTokens};
 use syn::{
     braced,
     parse::{Parse, ParseStream},
-    Attribute, Ident, Meta, Token, Type,
+    punctuated::Punctuated,
+    Attribute, Ident, Meta, Path, Token, Type,
 };
 
 pub struct AggregateInput {
@@ -50,21 +52,26 @@ pub struct FieldDef {
     pub name: Ident,
     /// Written as `#[rootless]`: the wrapper has no `root` field.
     pub rootless: bool,
+    /// Written as `#[collection]`: the field is filled from an iterator.
+    pub collection: bool,
+    /// Traits written as `#[derive(...)]`, derived on the field's wrapper and
+    /// the wrappers inside it.
+    pub derives: Vec<Path>,
     pub ty: TypeDef,
 }
 
 pub enum TypeDef {
-    /// A simple type name, optionally followed by a nested block.
+    /// A type path, optionally followed by a nested block.
     Named {
-        name: Ident,
+        path: TokenStream,
         body: Option<Vec<FieldDef>>,
     },
-    VecOf(Box<TypeDef>),
-    SetOf(Box<TypeDef>),
-    OptionOf(Box<TypeDef>),
-    /// Any other type with generic arguments, e.g. `Status<Foo>`. Its wrapper
-    /// holds the whole type as written, so it cannot have a nested block.
-    Generic(Type),
+    /// A type path with one generic argument, e.g. `Vec<Line>` or
+    /// `Option<Note>`. The path is kept as written.
+    Container {
+        path: TokenStream,
+        inner: Box<TypeDef>,
+    },
 }
 
 /// The attributes allowed before a root.
@@ -147,22 +154,46 @@ fn parse_value<T: Parse>(attr: &Attribute) -> syn::Result<T> {
     syn::parse2(name_value.value.to_token_stream())
 }
 
-/// Parses the attributes allowed before a field: only `#[rootless]`.
-fn parse_field_attrs(attrs: &[Attribute]) -> syn::Result<bool> {
-    let mut rootless = false;
+/// The flags written before a field.
+#[derive(Default)]
+struct FieldFlags {
+    rootless: bool,
+    collection: bool,
+    derives: Vec<Path>,
+}
+
+/// Parses the attributes allowed before a field: `#[rootless]`,
+/// `#[collection]` (each at most once) and `#[derive(...)]`.
+fn parse_field_attrs(attrs: &[Attribute]) -> syn::Result<FieldFlags> {
+    let mut flags = FieldFlags::default();
+    let mut has_derive = false;
     for attr in attrs {
-        if !attr.path().is_ident("rootless") || !matches!(attr.meta, Meta::Path(_)) {
+        if attr.path().is_ident("derive") {
+            if has_derive {
+                return Err(syn::Error::new_spanned(attr, "duplicate attribute"));
+            }
+            has_derive = true;
+            let traits = attr.parse_args_with(Punctuated::<Path, Token![,]>::parse_terminated)?;
+            flags.derives = traits.into_iter().collect();
+            continue;
+        }
+        let is_flag = matches!(attr.meta, Meta::Path(_));
+        let slot = if attr.path().is_ident("rootless") && is_flag {
+            &mut flags.rootless
+        } else if attr.path().is_ident("collection") && is_flag {
+            &mut flags.collection
+        } else {
             return Err(syn::Error::new_spanned(
                 attr,
-                "expected `#[rootless]` on a field",
+                "expected `#[rootless]`, `#[collection]` or `#[derive(...)]` on a field",
             ));
-        }
-        if rootless {
+        };
+        if *slot {
             return Err(syn::Error::new_spanned(attr, "duplicate attribute"));
         }
-        rootless = true;
+        *slot = true;
     }
-    Ok(rootless)
+    Ok(flags)
 }
 
 /// Parses the contents of a block: `#[attr]* ident: Type (comma?), ...`.
@@ -175,11 +206,17 @@ fn parse_block(input: ParseStream) -> syn::Result<Vec<FieldDef>> {
     let mut fields = Vec::new();
     while !content.is_empty() {
         let attrs = content.call(Attribute::parse_outer)?;
-        let rootless = parse_field_attrs(&attrs)?;
+        let flags = parse_field_attrs(&attrs)?;
         let name: Ident = content.parse()?;
         content.parse::<Token![:]>()?;
         let ty = TypeDef::parse(&content)?;
-        fields.push(FieldDef { name, rootless, ty });
+        fields.push(FieldDef {
+            name,
+            rootless: flags.rootless,
+            collection: flags.collection,
+            derives: flags.derives,
+            ty,
+        });
         // Trailing commas are optional.
         if !content.is_empty() {
             content.parse::<Option<Token![,]>>()?;
@@ -189,41 +226,27 @@ fn parse_block(input: ParseStream) -> syn::Result<Vec<FieldDef>> {
 }
 
 impl TypeDef {
+    /// Parses `Path`, `Path { fields }` or `Path<Inner>`. Any type with one
+    /// generic argument is a container, whatever its name.
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        let name: Ident = input.fork().parse()?;
-        let is_container = matches!(name.to_string().as_str(), "Vec" | "HashSet" | "Option");
-        if input.peek2(Token![<]) && !is_container {
-            let ty: Type = input.parse()?;
-            if input.peek(syn::token::Brace) {
-                return Err(syn::Error::new_spanned(
-                    &ty,
-                    "a type with generic arguments cannot have a nested block",
-                ));
-            }
-            return Ok(Self::Generic(ty));
+        let segments = Punctuated::<Ident, Token![::]>::parse_separated_nonempty(input)?;
+        let path = quote!(#segments);
+
+        if input.peek(Token![<]) {
+            input.parse::<Token![<]>()?;
+            let inner = Self::parse(input)?;
+            input.parse::<Token![>]>()?;
+            return Ok(Self::Container {
+                path,
+                inner: Box::new(inner),
+            });
         }
 
-        let name: Ident = input.parse()?;
-        match name.to_string().as_str() {
-            "Vec" => Ok(Self::VecOf(Box::new(Self::parse_generic_arg(input)?))),
-            "HashSet" => Ok(Self::SetOf(Box::new(Self::parse_generic_arg(input)?))),
-            "Option" => Ok(Self::OptionOf(Box::new(Self::parse_generic_arg(input)?))),
-            _ => {
-                let body = if input.peek(syn::token::Brace) {
-                    Some(parse_block(input)?)
-                } else {
-                    None
-                };
-                Ok(Self::Named { name, body })
-            }
-        }
-    }
-
-    /// Parses `<Inner>` after a container name.
-    fn parse_generic_arg(input: ParseStream) -> syn::Result<Self> {
-        input.parse::<Token![<]>()?;
-        let inner = Self::parse(input)?;
-        input.parse::<Token![>]>()?;
-        Ok(inner)
+        let body = if input.peek(syn::token::Brace) {
+            Some(parse_block(input)?)
+        } else {
+            None
+        };
+        Ok(Self::Named { path, body })
     }
 }

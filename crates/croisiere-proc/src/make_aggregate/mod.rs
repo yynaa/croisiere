@@ -10,6 +10,6 @@ use proc_macro2::TokenStream;
 
 pub use parse::AggregateInput;
 
-pub fn expand(input: AggregateInput) -> TokenStream {
+pub fn expand(input: AggregateInput) -> syn::Result<TokenStream> {
     generate::Generator::default().generate(input.roots)
 }

@@ -133,28 +133,60 @@ use syn::parse_macro_input;
 /// // pub struct AAggregateCD { pub root: D }
 /// ```
 ///
-/// Every comma is optional. Field types may also be `Vec<X>`, `HashSet<X>` or
-/// `Option<X>`, in which case the generated field type wraps the child
-/// aggregate accordingly.
+/// Every comma is optional.
 ///
-/// Any other generic type, such as a user enum `Status<Foo>`, is held as a
-/// whole: its wrapper has a `root` field of exactly that type and no nested
-/// fields.
+/// # Containers and collections
+///
+/// A field written as `Container<X>`, such as `Option<X>` or `Vec<X>`, holds
+/// the child wrapper of `X` inside `Container`. Whether the field is a
+/// single value or a collection is set with `#[collection]`:
 ///
 /// ```ignore
 /// make_aggregate!(
 ///     #[emits = AEvent]
 ///     #[fails = AError]
-///     A { status: Status<Foo>, maybe: Option<B> }
+///     A {
+///         #[collection] items: Vec<B { c: C }>,
+///         maybe: Option<D>,
+///     }
 /// );
-/// // pub struct AAggregate { pub root: A, pub status: AAggregateStatus, pub maybe: Option<AAggregateMaybe> }
-/// // pub struct AAggregateStatus { pub root: Status<Foo> }
-/// // pub struct AAggregateMaybe { pub root: B }
 /// ```
+///
+/// - Without `#[collection]`, the field is a single value of type
+///   `Container<X>`, set from `X` through `From`. `Option<X>` works this way.
+/// - With `#[collection]`, the container must implement `FromIterator`
+///   (`Vec`, `HashSet`, or any user type that does).
+/// - `#[derive(Trait, ...)]` on a field derives those traits on its wrapper and
+///   on the wrappers inside it, so the domain types must implement them too.
+///   `Debug` and `Default` are always derived. A `HashSet` needs
+///   `#[derive(PartialEq, Eq, Hash)]`; without it, elements need no extra
+///   traits.
+///
+/// Containers can't be nested, and `#[rootless]` fields can't be collections.
+///
+/// # Builders
+///
+/// `<Aggregate>::builder()` returns a builder whose setters are named after
+/// the fields. Anything not set keeps its default value, and `build()` never
+/// fails:
+///
+/// - a field takes its domain value: `.data(data)`;
+/// - a field with children also takes a closure that sets them:
+///   `.c(c, |c| c.d(d))`;
+/// - a `#[rootless]` field takes only that closure: `.meta(|m| m.code(code))`;
+/// - a `#[collection]` field takes a closure that returns an iterator of
+///   domain values, each converted to its wrapper with `Into`:
+///   `.items(|| vec![b1, b2])`. The elements' own children keep their
+///   defaults, so set them through field access afterwards.
+///
+/// An `Option<X>` field, as a single value, takes the value and, with children,
+/// the closure: `.maybe(d)` or `.maybe(d, |d| d.e(e))`.
 #[proc_macro]
 pub fn make_aggregate(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as make_aggregate::AggregateInput);
-    make_aggregate::expand(input).into()
+    make_aggregate::expand(input)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
 }
 
 /// Wraps the impl block in a snake-cased module derived from the self type,
