@@ -46,7 +46,8 @@ use syn::parse_macro_input;
 /// );
 /// ```
 ///
-/// generates (naming scheme: `<root>Aggregate<path>`, see below to override):
+/// generates (naming scheme: `<root>Aggregate<field path>`, with field names in
+/// PascalCase; see below to override):
 ///
 /// ```ignore
 /// pub struct AAggregate {
@@ -87,8 +88,9 @@ use syn::parse_macro_input;
 ///
 /// # Custom aggregate name
 ///
-/// `#[alias = Name]` names the aggregate `Name` instead of `<root>Aggregate`.
-/// Nested wrappers then use it as their prefix, and `NAME` follows it:
+/// `#[alias = Name]` names the aggregate `NameAggregate` instead of
+/// `<root>Aggregate`. Nested wrappers then use it as their prefix, and `NAME`
+/// follows it. `#[alias(exact = Name)]` names the aggregate `Name` as written:
 ///
 /// ```ignore
 /// make_aggregate!(
@@ -97,8 +99,20 @@ use syn::parse_macro_input;
 ///     #[fails = CounterError]
 ///     Counter { data: CounterData }
 /// );
-/// // pub struct Tally { pub root: Counter, pub data: TallyCounterData }
-/// // pub struct TallyCounterData { pub root: CounterData }
+/// // pub struct TallyAggregate { pub root: Counter, pub data: TallyAggregateData }
+/// // pub struct TallyAggregateData { pub root: CounterData }
+/// // impl Aggregate for TallyAggregate { const NAME: &'static str = "TallyAggregate"; ... }
+/// ```
+///
+/// ```ignore
+/// make_aggregate!(
+///     #[alias(exact = Tally)]
+///     #[emits = CounterEvent]
+///     #[fails = CounterError]
+///     Counter { data: CounterData }
+/// );
+/// // pub struct Tally { pub root: Counter, pub data: TallyData }
+/// // pub struct TallyData { pub root: CounterData }
 /// // impl Aggregate for Tally { const NAME: &'static str = "Tally"; ... }
 /// ```
 ///
@@ -133,9 +147,9 @@ use syn::parse_macro_input;
 ///     #[fails = AError]
 ///     A { status: Status<Foo>, maybe: Option<B> }
 /// );
-/// // pub struct AAggregate { pub root: A, pub status: AAggregateStatusFoo, pub maybe: Option<AAggregateB> }
-/// // pub struct AAggregateStatusFoo { pub root: Status<Foo> }
-/// // pub struct AAggregateB { pub root: B }
+/// // pub struct AAggregate { pub root: A, pub status: AAggregateStatus, pub maybe: Option<AAggregateMaybe> }
+/// // pub struct AAggregateStatus { pub root: Status<Foo> }
+/// // pub struct AAggregateMaybe { pub root: B }
 /// ```
 #[proc_macro]
 pub fn make_aggregate(input: TokenStream) -> TokenStream {

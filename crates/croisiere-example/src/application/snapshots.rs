@@ -1,7 +1,7 @@
 use croisiere::application::{Filter, Snapshot, Sorter};
 
 use crate::domain::{
-    aggregates::{CounterAggregate, CounterAggregateCounterData},
+    aggregates::{CounterAggregate, CounterAggregateData},
     entities::Counter,
     value_objects::CounterData,
 };
@@ -28,7 +28,7 @@ impl TryFrom<CounterSnapshot> for CounterAggregate {
     fn try_from(value: CounterSnapshot) -> Result<Self, Self::Error> {
         Ok(Self {
             root: Counter { name: value.name },
-            data: CounterAggregateCounterData {
+            data: CounterAggregateData {
                 root: CounterData {
                     counter: value.counter,
                 },

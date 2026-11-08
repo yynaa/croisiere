@@ -3,13 +3,13 @@
 use std::collections::HashSet;
 
 use proc_macro2::TokenStream;
-use quote::{format_ident, quote, ToTokens};
-use syn::{Ident, Type};
+use quote::{format_ident, quote};
+use syn::{ext::IdentExt, Ident, Type};
 
 use super::parse::{NodeDef, TypeDef};
 
 struct WrapperDef {
-    /// Generated wrapper name, e.g. `AAggregateCD`.
+    /// Generated wrapper name, e.g. `AAggregateCD` for field `c` then `d`.
     name: Ident,
     /// The original domain type held in `root`, or `None` for a `rootless` node.
     original: Option<TokenStream>,
@@ -35,7 +35,7 @@ pub struct Generator {
 impl Generator {
     pub fn generate(mut self, roots: Vec<NodeDef>) -> TokenStream {
         for root in &roots {
-            // `#[alias = Alias]` names the aggregate `Alias`; otherwise it is
+            // `#[alias]` gives the aggregate its name; otherwise it is
             // `<root>Aggregate`.
             let wrapper = match &root.alias {
                 Some(alias) => alias.clone(),
@@ -46,8 +46,8 @@ impl Generator {
             let mut fields = Vec::new();
             for field in &root.fields {
                 // Children of the root start with an empty path: their wrapper
-                // names are `<aggregate name><own name>`.
-                let ty = self.resolve(&field.ty, field.rootless, &prefix, &[]);
+                // names are `<aggregate name><field name>`.
+                let ty = self.resolve(&field.ty, &field.name, field.rootless, &prefix, &[]);
                 fields.push((field.name.clone(), ty));
             }
 
@@ -65,40 +65,44 @@ impl Generator {
     /// every needed child wrapper into the output.
     ///
     /// `prefix` is the aggregate's name (e.g. `CounterAggregate`), which every
-    /// nested wrapper name starts with. `ancestors` is the chain of type names
-    /// from the root to the enclosing node, excluding the root's own name.
+    /// nested wrapper name starts with. `field` is the name of the field being
+    /// resolved and `ancestors` the chain of field names from the root to the
+    /// enclosing field, excluding `field`. Wrapper names come from field names
+    /// so that the same type can be used in several places.
     /// `rootless` is the `#[rootless]` flag of the field being resolved; it
     /// applies to the named type inside any `Vec`/`HashSet`.
     fn resolve(
         &mut self,
         ty: &TypeDef,
+        field: &Ident,
         rootless: bool,
         prefix: &str,
         ancestors: &[String],
     ) -> TokenStream {
         match ty {
             TypeDef::VecOf(inner) => {
-                let inner = self.resolve(inner, rootless, prefix, ancestors);
+                let inner = self.resolve(inner, field, rootless, prefix, ancestors);
                 quote!(::std::vec::Vec<#inner>)
             }
             TypeDef::SetOf(inner) => {
-                let inner = self.resolve(inner, rootless, prefix, ancestors);
+                let inner = self.resolve(inner, field, rootless, prefix, ancestors);
                 quote!(::std::collections::HashSet<#inner>)
             }
             TypeDef::OptionOf(inner) => {
-                let inner = self.resolve(inner, rootless, prefix, ancestors);
+                let inner = self.resolve(inner, field, rootless, prefix, ancestors);
                 quote!(::std::option::Option<#inner>)
             }
             TypeDef::Named { name, body } => {
                 let mut path = ancestors.to_vec();
-                path.push(name.to_string());
+                path.push(pascal_case(field));
                 let wrapper = format_ident!("{}{}", prefix, path.concat());
 
                 let mut fields = Vec::new();
                 if let Some(children) = body {
-                    for field in children {
-                        let child_ty = self.resolve(&field.ty, field.rootless, prefix, &path);
-                        fields.push((field.name.clone(), child_ty));
+                    for child in children {
+                        let child_ty =
+                            self.resolve(&child.ty, &child.name, child.rootless, prefix, &path);
+                        fields.push((child.name.clone(), child_ty));
                     }
                 }
                 let original = (!rootless).then(|| quote!(#name));
@@ -106,16 +110,8 @@ impl Generator {
                 quote!(#wrapper)
             }
             TypeDef::Generic(ty) => {
-                // The wrapper name comes from the full type, so `Status<Foo>`
-                // and `Status<Bar>` get different wrappers.
                 let mut path = ancestors.to_vec();
-                let written = ty.to_token_stream().to_string();
-                path.push(
-                    written
-                        .chars()
-                        .filter(char::is_ascii_alphanumeric)
-                        .collect(),
-                );
+                path.push(pascal_case(field));
                 let wrapper = format_ident!("{}{}", prefix, path.concat());
 
                 let original = (!rootless).then(|| quote!(#ty));
@@ -175,4 +171,23 @@ impl Generator {
         }
         expanded
     }
+}
+
+/// `field_name` as `FieldName`, used as a segment of a wrapper name.
+fn pascal_case(field: &Ident) -> String {
+    field
+        .unraw()
+        .to_string()
+        .split('_')
+        .filter(|segment| !segment.is_empty())
+        .map(|segment| {
+            let mut chars = segment.chars();
+            chars
+                .next()
+                .into_iter()
+                .flat_map(char::to_uppercase)
+                .chain(chars)
+                .collect::<String>()
+        })
+        .collect()
 }

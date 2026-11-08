@@ -1,6 +1,6 @@
 //! Parsing of the `make_aggregate!` DSL.
 
-use quote::ToTokens;
+use quote::{format_ident, ToTokens};
 use syn::{
     braced,
     parse::{Parse, ParseStream},
@@ -37,7 +37,7 @@ impl Parse for AggregateInput {
 
 pub struct NodeDef {
     pub name: Ident,
-    /// Custom name for the generated aggregate (`#[alias = Alias]`).
+    /// Full name of the generated aggregate, when set with `#[alias]`.
     pub alias: Option<Ident>,
     pub fields: Vec<FieldDef>,
     /// `Aggregate::Event`, from `#[emits = EventType]`.
@@ -81,7 +81,7 @@ impl RootAttrs {
         let mut error = None;
         for attr in attrs {
             if attr.path().is_ident("alias") {
-                set_once(&mut alias, attr, parse_value::<Ident>(attr)?)?;
+                set_once(&mut alias, attr, parse_alias(attr)?)?;
             } else if attr.path().is_ident("emits") {
                 set_once(&mut event, attr, parse_value::<Type>(attr)?)?;
             } else if attr.path().is_ident("fails") {
@@ -89,7 +89,7 @@ impl RootAttrs {
             } else {
                 return Err(syn::Error::new_spanned(
                     attr,
-                    "expected `#[alias = Name]`, `#[emits = EventType]` or `#[fails = ErrorType]`",
+                    "expected `#[alias = Name]`, `#[alias(exact = Name)]`, `#[emits = EventType]` or `#[fails = ErrorType]`",
                 ));
             }
         }
@@ -104,6 +104,29 @@ impl RootAttrs {
             event: event.ok_or_else(|| missing("emits"))?,
             error: error.ok_or_else(|| missing("fails"))?,
         })
+    }
+}
+
+/// Parses `#[alias = Name]`, which names the aggregate `NameAggregate`, or
+/// `#[alias(exact = Name)]`, which names it `Name`.
+fn parse_alias(attr: &Attribute) -> syn::Result<Ident> {
+    match &attr.meta {
+        Meta::NameValue(_) => {
+            let name: Ident = parse_value(attr)?;
+            Ok(format_ident!("{}Aggregate", name))
+        }
+        Meta::List(_) => attr.parse_args_with(|input: ParseStream| {
+            let key: Ident = input.parse()?;
+            if key != "exact" {
+                return Err(syn::Error::new_spanned(&key, "expected `exact`"));
+            }
+            input.parse::<Token![=]>()?;
+            input.parse::<Ident>()
+        }),
+        Meta::Path(_) => Err(syn::Error::new_spanned(
+            attr,
+            "expected `#[alias = Name]` or `#[alias(exact = Name)]`",
+        )),
     }
 }
 
