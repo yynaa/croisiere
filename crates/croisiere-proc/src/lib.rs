@@ -35,12 +35,14 @@ use syn::parse_macro_input;
 ///
 /// ```ignore
 /// make_aggregate!(
+///     #[emits = AEvent]
+///     #[fails = AError]
 ///     A {
 ///         b: B,
 ///         c: C {
 ///             d: D,
 ///         },
-///     } emits AEvent fails AError,
+///     }
 /// );
 /// ```
 ///
@@ -78,21 +80,43 @@ use syn::parse_macro_input;
 ///
 /// # Events and errors
 ///
-/// Every root must be followed by `emits EventType fails ErrorType` (in that
-/// order). They become `Aggregate::Event` and
+/// Every root must have `#[emits = EventType]` and `#[fails = ErrorType]`
+/// attributes before it. They become `Aggregate::Event` and
 /// `Aggregate::Error`, which `#[aggregate_functions]` uses for
 /// `ActionResult` and `CreationResult`.
 ///
 /// # Custom aggregate name
 ///
-/// `Root as Name` names the aggregate `Name` instead of `<root>Aggregate`.
+/// `#[alias = Name]` names the aggregate `Name` instead of `<root>Aggregate`.
 /// Nested wrappers then use it as their prefix, and `NAME` follows it:
 ///
 /// ```ignore
-/// make_aggregate!(Counter as Tally { data: CounterData } emits CounterEvent fails CounterError);
+/// make_aggregate!(
+///     #[alias = Tally]
+///     #[emits = CounterEvent]
+///     #[fails = CounterError]
+///     Counter { data: CounterData }
+/// );
 /// // pub struct Tally { pub root: Counter, pub data: TallyCounterData }
 /// // pub struct TallyCounterData { pub root: CounterData }
 /// // impl Aggregate for Tally { const NAME: &'static str = "Tally"; ... }
+/// ```
+///
+/// # Rootless nodes
+///
+/// `#[rootless]` on a field declares its nested wrapper without a `root`
+/// field, for when there is no domain type to hold. Its fields are still
+/// generated as usual:
+///
+/// ```ignore
+/// make_aggregate!(
+///     #[emits = AEvent]
+///     #[fails = AError]
+///     A { #[rootless] c: C { d: D } }
+/// );
+/// // pub struct AAggregate { pub root: A, pub c: AAggregateC }
+/// // pub struct AAggregateC { pub d: AAggregateCD }
+/// // pub struct AAggregateCD { pub root: D }
 /// ```
 ///
 /// Every comma is optional. Field types may also be `Vec<X>` or `HashSet<X>`,
@@ -108,7 +132,7 @@ pub fn make_aggregate(input: TokenStream) -> TokenStream {
 /// giving it a convenient scope for aggregate-related helpers.
 ///
 /// It defines two result aliases in that module, built from the event and
-/// error types of the self type's `Aggregate` impl (set with `emits`/`fails`
+/// error types of the self type's `Aggregate` impl (set with `#[emits]`/`#[fails]`
 /// in `make_aggregate!`), so the attribute takes no arguments:
 ///
 /// - `ActionResult`: for actions on an existing aggregate, returning the

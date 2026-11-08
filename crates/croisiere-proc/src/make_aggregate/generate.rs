@@ -11,8 +11,8 @@ use super::parse::{NodeDef, TypeDef};
 struct WrapperDef {
     /// Generated wrapper name, e.g. `AAggregateCD`.
     name: Ident,
-    /// The original domain type held in `root`.
-    original: Ident,
+    /// The original domain type held in `root`, or `None` for a `rootless` node.
+    original: Option<Ident>,
     /// Wrapper fields: `(field name, field type)`.
     fields: Vec<(Ident, TokenStream)>,
     /// Set only on the top-level `<root>Aggregate` wrapper, which gets the
@@ -35,7 +35,7 @@ pub struct Generator {
 impl Generator {
     pub fn generate(mut self, roots: Vec<NodeDef>) -> TokenStream {
         for root in &roots {
-            // `Root as Alias` names the aggregate `Alias`; otherwise it is
+            // `#[alias = Alias]` names the aggregate `Alias`; otherwise it is
             // `<root>Aggregate`.
             let wrapper = match &root.alias {
                 Some(alias) => alias.clone(),
@@ -47,7 +47,7 @@ impl Generator {
             for field in &root.fields {
                 // Children of the root start with an empty path: their wrapper
                 // names are `<aggregate name><own name>`.
-                let ty = self.resolve(&field.ty, &prefix, &[]);
+                let ty = self.resolve(&field.ty, field.rootless, &prefix, &[]);
                 fields.push((field.name.clone(), ty));
             }
 
@@ -55,7 +55,7 @@ impl Generator {
                 event: root.event.clone(),
                 error: root.error.clone(),
             };
-            self.push(wrapper, root.name.clone(), fields, Some(types));
+            self.push(wrapper, Some(root.name.clone()), fields, Some(types));
         }
         self.expand()
     }
@@ -66,14 +66,22 @@ impl Generator {
     /// `prefix` is the aggregate's name (e.g. `CounterAggregate`), which every
     /// nested wrapper name starts with. `ancestors` is the chain of type names
     /// from the root to the enclosing node, excluding the root's own name.
-    fn resolve(&mut self, ty: &TypeDef, prefix: &str, ancestors: &[String]) -> TokenStream {
+    /// `rootless` is the `#[rootless]` flag of the field being resolved; it
+    /// applies to the named type inside any `Vec`/`HashSet`.
+    fn resolve(
+        &mut self,
+        ty: &TypeDef,
+        rootless: bool,
+        prefix: &str,
+        ancestors: &[String],
+    ) -> TokenStream {
         match ty {
             TypeDef::VecOf(inner) => {
-                let inner = self.resolve(inner, prefix, ancestors);
+                let inner = self.resolve(inner, rootless, prefix, ancestors);
                 quote!(::std::vec::Vec<#inner>)
             }
             TypeDef::SetOf(inner) => {
-                let inner = self.resolve(inner, prefix, ancestors);
+                let inner = self.resolve(inner, rootless, prefix, ancestors);
                 quote!(::std::collections::HashSet<#inner>)
             }
             TypeDef::Named { name, body } => {
@@ -84,11 +92,12 @@ impl Generator {
                 let mut fields = Vec::new();
                 if let Some(children) = body {
                     for field in children {
-                        let child_ty = self.resolve(&field.ty, prefix, &path);
+                        let child_ty = self.resolve(&field.ty, field.rootless, prefix, &path);
                         fields.push((field.name.clone(), child_ty));
                     }
                 }
-                self.push(wrapper.clone(), name.clone(), fields, None);
+                let original = (!rootless).then(|| name.clone());
+                self.push(wrapper.clone(), original, fields, None);
                 quote!(#wrapper)
             }
         }
@@ -97,7 +106,7 @@ impl Generator {
     fn push(
         &mut self,
         name: Ident,
-        original: Ident,
+        original: Option<Ident>,
         fields: Vec<(Ident, TokenStream)>,
         aggregate: Option<AggregateTypes>,
     ) {
@@ -116,7 +125,10 @@ impl Generator {
         let mut expanded = TokenStream::new();
         for wrapper in &self.wrappers {
             let name = &wrapper.name;
-            let original = &wrapper.original;
+            let root = wrapper
+                .original
+                .as_ref()
+                .map(|original| quote!(pub root: #original,));
             let fields = wrapper
                 .fields
                 .iter()
@@ -124,7 +136,7 @@ impl Generator {
             expanded.extend(quote! {
                 #[derive(Debug, Default)]
                 pub struct #name {
-                    pub root: #original,
+                    #root
                     #(#fields)*
                 }
             });

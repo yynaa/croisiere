@@ -9,12 +9,12 @@ use std::fmt::Debug;
 /// You should not implement this yourself, use [`make_aggregate`].
 pub trait Aggregate: Debug + Default {
     /// Name of the aggregate type, set to the generated type's identifier by
-    /// [`make_aggregate`] (or to the name given with `as`).
+    /// [`make_aggregate`] (or to the name given with `#[alias]`).
     const NAME: &'static str;
-    /// Error returned by the aggregate's functions, set with `fails` in
+    /// Error returned by the aggregate's functions, set with `#[fails]` in
     /// [`make_aggregate`].
     type Error;
-    /// Events emitted by the aggregate's functions, set with `emits` in
+    /// Events emitted by the aggregate's functions, set with `#[emits]` in
     /// [`make_aggregate`].
     type Event;
 }

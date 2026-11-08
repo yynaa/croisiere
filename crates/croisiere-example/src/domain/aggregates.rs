@@ -2,7 +2,11 @@ use croisiere::domain::{aggregate_functions, make_aggregate};
 
 use crate::domain::{entities::Counter, value_objects::CounterData};
 
-make_aggregate!(Counter { data: CounterData } emits CounterEvent fails CounterError);
+make_aggregate!(
+    #[emits = CounterEvent]
+    #[fails = CounterError]
+    Counter { data: CounterData }
+);
 
 #[derive(Debug)]
 pub enum CounterEvent {

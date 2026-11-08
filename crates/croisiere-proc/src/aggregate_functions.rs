@@ -11,7 +11,7 @@ pub fn expand(attr: TokenStream, item: ItemImpl) -> syn::Result<TokenStream> {
         return Err(syn::Error::new_spanned(
             attr,
             "aggregate_functions takes no arguments; event and error types come from \
-             `emits`/`fails` in make_aggregate!",
+             `#[emits]`/`#[fails]` in make_aggregate!",
         ));
     }
 

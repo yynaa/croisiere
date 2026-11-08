@@ -1,9 +1,10 @@
 //! Parsing of the `make_aggregate!` DSL.
 
+use quote::ToTokens;
 use syn::{
     braced,
     parse::{Parse, ParseStream},
-    Ident, Token, Type,
+    Attribute, Ident, Meta, Token, Type,
 };
 
 pub struct AggregateInput {
@@ -14,24 +15,16 @@ impl Parse for AggregateInput {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut roots = Vec::new();
         while !input.is_empty() {
+            let attrs = input.call(Attribute::parse_outer)?;
             let name: Ident = input.parse()?;
-            // Optional custom aggregate name: `Root as CustomName { ... }`.
-            let alias = if input.peek(Token![as]) {
-                input.parse::<Token![as]>()?;
-                Some(input.parse::<Ident>()?)
-            } else {
-                None
-            };
             let fields = parse_block(input)?;
-            // Required: `emits EventType fails ErrorType`.
-            let event = parse_keyword_type(input, "emits", "event")?;
-            let error = parse_keyword_type(input, "fails", "error")?;
+            let root = RootAttrs::from_attrs(&attrs, &name)?;
             roots.push(NodeDef {
                 name,
-                alias,
+                alias: root.alias,
                 fields,
-                event,
-                error,
+                event: root.event,
+                error: root.error,
             });
             // Trailing commas are optional.
             if !input.is_empty() {
@@ -44,17 +37,19 @@ impl Parse for AggregateInput {
 
 pub struct NodeDef {
     pub name: Ident,
-    /// Custom name for the generated aggregate (`Root as Alias`).
+    /// Custom name for the generated aggregate (`#[alias = Alias]`).
     pub alias: Option<Ident>,
     pub fields: Vec<FieldDef>,
-    /// `Aggregate::Event`, from `emits EventType`.
+    /// `Aggregate::Event`, from `#[emits = EventType]`.
     pub event: Type,
-    /// `Aggregate::Error`, from `fails ErrorType`.
+    /// `Aggregate::Error`, from `#[fails = ErrorType]`.
     pub error: Type,
 }
 
 pub struct FieldDef {
     pub name: Ident,
+    /// Written as `#[rootless]`: the wrapper has no `root` field.
+    pub rootless: bool,
     pub ty: TypeDef,
 }
 
@@ -68,21 +63,82 @@ pub enum TypeDef {
     SetOf(Box<TypeDef>),
 }
 
-/// Parses `<keyword> Type`, where `keyword` is a contextual keyword such as
-/// `emits`. `what` names the type in error messages.
-fn parse_keyword_type(input: ParseStream, keyword: &str, what: &str) -> syn::Result<Type> {
-    let message = format!("expected `{keyword} <{what} type>` after the aggregate definition");
-    if input.is_empty() {
-        return Err(input.error(message));
-    }
-    let ident: Ident = input.parse().map_err(|err| syn::Error::new(err.span(), &message))?;
-    if ident != keyword {
-        return Err(syn::Error::new(ident.span(), message));
-    }
-    input.parse()
+/// The attributes allowed before a root.
+struct RootAttrs {
+    alias: Option<Ident>,
+    event: Type,
+    error: Type,
 }
 
-/// Parses the contents of a block: `ident: Type (comma?), ...`.
+impl RootAttrs {
+    fn from_attrs(attrs: &[Attribute], root: &Ident) -> syn::Result<Self> {
+        let mut alias = None;
+        let mut event = None;
+        let mut error = None;
+        for attr in attrs {
+            if attr.path().is_ident("alias") {
+                set_once(&mut alias, attr, parse_value::<Ident>(attr)?)?;
+            } else if attr.path().is_ident("emits") {
+                set_once(&mut event, attr, parse_value::<Type>(attr)?)?;
+            } else if attr.path().is_ident("fails") {
+                set_once(&mut error, attr, parse_value::<Type>(attr)?)?;
+            } else {
+                return Err(syn::Error::new_spanned(
+                    attr,
+                    "expected `#[alias = Name]`, `#[emits = EventType]` or `#[fails = ErrorType]`",
+                ));
+            }
+        }
+        let missing = |what: &str| {
+            syn::Error::new(
+                root.span(),
+                format!("missing `#[{what} = ...]` on the aggregate root `{root}`"),
+            )
+        };
+        Ok(Self {
+            alias,
+            event: event.ok_or_else(|| missing("emits"))?,
+            error: error.ok_or_else(|| missing("fails"))?,
+        })
+    }
+}
+
+/// Stores `value` in `slot`, rejecting a second occurrence of the same attribute.
+fn set_once<T>(slot: &mut Option<T>, attr: &Attribute, value: T) -> syn::Result<()> {
+    if slot.is_some() {
+        return Err(syn::Error::new_spanned(attr, "duplicate attribute"));
+    }
+    *slot = Some(value);
+    Ok(())
+}
+
+/// Parses the value of a `#[name = value]` attribute as `T`.
+fn parse_value<T: Parse>(attr: &Attribute) -> syn::Result<T> {
+    let Meta::NameValue(name_value) = &attr.meta else {
+        return Err(syn::Error::new_spanned(attr, "expected `#[name = value]`"));
+    };
+    syn::parse2(name_value.value.to_token_stream())
+}
+
+/// Parses the attributes allowed before a field: only `#[rootless]`.
+fn parse_field_attrs(attrs: &[Attribute]) -> syn::Result<bool> {
+    let mut rootless = false;
+    for attr in attrs {
+        if !attr.path().is_ident("rootless") || !matches!(attr.meta, Meta::Path(_)) {
+            return Err(syn::Error::new_spanned(
+                attr,
+                "expected `#[rootless]` on a field",
+            ));
+        }
+        if rootless {
+            return Err(syn::Error::new_spanned(attr, "duplicate attribute"));
+        }
+        rootless = true;
+    }
+    Ok(rootless)
+}
+
+/// Parses the contents of a block: `#[attr]* ident: Type (comma?), ...`.
 fn parse_block(input: ParseStream) -> syn::Result<Vec<FieldDef>> {
     if !input.peek(syn::token::Brace) {
         return Ok(Vec::new());
@@ -91,10 +147,12 @@ fn parse_block(input: ParseStream) -> syn::Result<Vec<FieldDef>> {
     braced!(content in input);
     let mut fields = Vec::new();
     while !content.is_empty() {
+        let attrs = content.call(Attribute::parse_outer)?;
+        let rootless = parse_field_attrs(&attrs)?;
         let name: Ident = content.parse()?;
         content.parse::<Token![:]>()?;
         let ty = TypeDef::parse(&content)?;
-        fields.push(FieldDef { name, ty });
+        fields.push(FieldDef { name, rootless, ty });
         // Trailing commas are optional.
         if !content.is_empty() {
             content.parse::<Option<Token![,]>>()?;
