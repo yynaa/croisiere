@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use syn::Ident;
+use syn::{Ident, Type};
 
 use super::parse::{NodeDef, TypeDef};
 
@@ -15,9 +15,15 @@ struct WrapperDef {
     original: Ident,
     /// Wrapper fields: `(field name, field type)`.
     fields: Vec<(Ident, TokenStream)>,
-    /// Whether this is the top-level `<root>Aggregate` wrapper, which gets the
+    /// Set only on the top-level `<root>Aggregate` wrapper, which gets the
     /// `Aggregate` impl. Nested wrappers are only views inside it.
-    is_root: bool,
+    aggregate: Option<AggregateTypes>,
+}
+
+/// Associated types of the `Aggregate` impl.
+struct AggregateTypes {
+    event: Type,
+    error: Type,
 }
 
 #[derive(Default)]
@@ -45,7 +51,11 @@ impl Generator {
                 fields.push((field.name.clone(), ty));
             }
 
-            self.push(wrapper, root.name.clone(), fields, true);
+            let types = AggregateTypes {
+                event: root.event.clone(),
+                error: root.error.clone(),
+            };
+            self.push(wrapper, root.name.clone(), fields, Some(types));
         }
         self.expand()
     }
@@ -78,7 +88,7 @@ impl Generator {
                         fields.push((field.name.clone(), child_ty));
                     }
                 }
-                self.push(wrapper.clone(), name.clone(), fields, false);
+                self.push(wrapper.clone(), name.clone(), fields, None);
                 quote!(#wrapper)
             }
         }
@@ -89,7 +99,7 @@ impl Generator {
         name: Ident,
         original: Ident,
         fields: Vec<(Ident, TokenStream)>,
-        is_root: bool,
+        aggregate: Option<AggregateTypes>,
     ) {
         // Identical paths resolve to the same wrapper; only emit it once.
         if self.seen.insert(name.to_string()) {
@@ -97,7 +107,7 @@ impl Generator {
                 name,
                 original,
                 fields,
-                is_root,
+                aggregate,
             });
         }
     }
@@ -118,11 +128,13 @@ impl Generator {
                     #(#fields)*
                 }
             });
-            if wrapper.is_root {
+            if let Some(AggregateTypes { event, error }) = &wrapper.aggregate {
                 let name_str = name.to_string();
                 expanded.extend(quote! {
                     impl ::croisiere::domain::Aggregate for #name {
                         const NAME: &'static str = #name_str;
+                        type Error = #error;
+                        type Event = #event;
                     }
                 });
             }

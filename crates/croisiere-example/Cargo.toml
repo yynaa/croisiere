@@ -5,3 +5,5 @@ edition = "2024"
 
 [dependencies]
 croisiere = { path = "../.." }
+anyhow = "1"
+crossbeam-channel = "0.5"

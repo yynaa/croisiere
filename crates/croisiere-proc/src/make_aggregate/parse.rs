@@ -3,7 +3,7 @@
 use syn::{
     braced,
     parse::{Parse, ParseStream},
-    Ident, Token,
+    Ident, Token, Type,
 };
 
 pub struct AggregateInput {
@@ -23,10 +23,15 @@ impl Parse for AggregateInput {
                 None
             };
             let fields = parse_block(input)?;
+            // Required: `emits EventType fails ErrorType`.
+            let event = parse_keyword_type(input, "emits", "event")?;
+            let error = parse_keyword_type(input, "fails", "error")?;
             roots.push(NodeDef {
                 name,
                 alias,
                 fields,
+                event,
+                error,
             });
             // Trailing commas are optional.
             if !input.is_empty() {
@@ -42,6 +47,10 @@ pub struct NodeDef {
     /// Custom name for the generated aggregate (`Root as Alias`).
     pub alias: Option<Ident>,
     pub fields: Vec<FieldDef>,
+    /// `Aggregate::Event`, from `emits EventType`.
+    pub event: Type,
+    /// `Aggregate::Error`, from `fails ErrorType`.
+    pub error: Type,
 }
 
 pub struct FieldDef {
@@ -57,6 +66,20 @@ pub enum TypeDef {
     },
     VecOf(Box<TypeDef>),
     SetOf(Box<TypeDef>),
+}
+
+/// Parses `<keyword> Type`, where `keyword` is a contextual keyword such as
+/// `emits`. `what` names the type in error messages.
+fn parse_keyword_type(input: ParseStream, keyword: &str, what: &str) -> syn::Result<Type> {
+    let message = format!("expected `{keyword} <{what} type>` after the aggregate definition");
+    if input.is_empty() {
+        return Err(input.error(message));
+    }
+    let ident: Ident = input.parse().map_err(|err| syn::Error::new(err.span(), &message))?;
+    if ident != keyword {
+        return Err(syn::Error::new(ident.span(), message));
+    }
+    input.parse()
 }
 
 /// Parses the contents of a block: `ident: Type (comma?), ...`.

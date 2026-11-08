@@ -1,38 +1,44 @@
 use croisiere::domain::{aggregate_functions, make_aggregate};
 
-use crate::domain::{
-    entities::{Counter, CounterGroup},
-    value_objects::CounterData,
-};
+use crate::domain::{entities::Counter, value_objects::CounterData};
 
-make_aggregate!(
-    CounterGroup {
-        counters: Vec<Counter {
-            data: CounterData
-        }>
-    }
-);
+make_aggregate!(Counter { data: CounterData } emits CounterEvent fails CounterError);
 
-make_aggregate!(Counter { data: CounterData });
-
+#[derive(Debug)]
 pub enum CounterEvent {
+    Created { name: String },
     Incremented { name: String },
 }
 
+#[derive(Debug)]
 pub enum CounterError {
+    EmptyName,
     CannotDecrement,
 }
 
-#[aggregate_functions(CounterEvent, CounterError)]
+#[aggregate_functions]
 impl CounterAggregate {
-    pub fn increment(&mut self) -> DomainResult {
+    /// Creates a counter starting at 0.
+    pub fn create(name: String) -> CreationResult {
+        if name.is_empty() {
+            return Err(CounterError::EmptyName);
+        }
+        let events = vec![CounterEvent::Created { name: name.clone() }];
+        let aggregate = Self {
+            root: Counter { name },
+            ..Default::default()
+        };
+        Ok((aggregate, events))
+    }
+
+    pub fn increment(&mut self) -> ActionResult {
         self.data.root.counter += 1;
         Ok(vec![CounterEvent::Incremented {
             name: self.root.name.clone(),
         }])
     }
 
-    pub fn decrement(&mut self) -> DomainResult {
+    pub fn decrement(&mut self) -> ActionResult {
         if self.data.root.counter == 0 {
             return Err(CounterError::CannotDecrement);
         }

@@ -1,38 +1,44 @@
-//! `#[aggregate_functions(Event, Error)]`.
+//! `#[aggregate_functions]`.
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use syn::{
-    parse::{Parse, ParseStream},
-    Ident, ItemImpl, Token, Type,
-};
+use syn::{Ident, ItemImpl, Type};
 
-/// Attribute arguments: `(EventType, ErrorType)`.
-pub struct FunctionArgs {
-    event: Type,
-    error: Type,
-}
-
-impl Parse for FunctionArgs {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let event: Type = input.parse()?;
-        input.parse::<Token![,]>()?;
-        let error: Type = input.parse()?;
-        Ok(Self { event, error })
+/// `attr` is the attribute's argument list, which must be empty: the event and
+/// error types come from the self type's `Aggregate` impl.
+pub fn expand(attr: TokenStream, item: ItemImpl) -> syn::Result<TokenStream> {
+    if !attr.is_empty() {
+        return Err(syn::Error::new_spanned(
+            attr,
+            "aggregate_functions takes no arguments; event and error types come from \
+             `emits`/`fails` in make_aggregate!",
+        ));
     }
-}
 
-pub fn expand(args: FunctionArgs, item: ItemImpl) -> syn::Result<TokenStream> {
     let self_name = self_type_name(&item)?;
     let mod_name = format_ident!("{}", to_snake_case(&self_name.to_string()));
-    let FunctionArgs { event, error } = args;
+    let aggregate = quote!(<#self_name as ::croisiere::domain::Aggregate>);
 
     Ok(quote! {
         mod #mod_name {
             use super::#self_name;
             use super::*;
 
-            type DomainResult = ::std::result::Result<::std::vec::Vec<#event>, #error>;
+            /// Result of an action on an existing aggregate: the events it
+            /// emitted, or the error that prevented it.
+            #[allow(dead_code)]
+            type ActionResult = ::std::result::Result<
+                ::std::vec::Vec<#aggregate::Event>,
+                #aggregate::Error,
+            >;
+
+            /// Result of creating an aggregate: the new aggregate with the
+            /// events its creation emitted, or the error that prevented it.
+            #[allow(dead_code)]
+            type CreationResult = ::std::result::Result<
+                (#self_name, ::std::vec::Vec<#aggregate::Event>),
+                #aggregate::Error,
+            >;
 
             #item
         }
