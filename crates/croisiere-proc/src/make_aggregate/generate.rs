@@ -35,6 +35,9 @@ struct WrapperDef {
     /// `Aggregate` impl and `builder()`. Nested wrappers are only views inside
     /// it.
     aggregate: Option<AggregateTypes>,
+    /// Whether the wrapper gets a builder; off for every wrapper of an
+    /// aggregate written with `#[no_builder]`.
+    builder: bool,
 }
 
 /// Associated types of the `Aggregate` impl.
@@ -64,7 +67,7 @@ impl Generator {
             // names are `<aggregate name><field name>`.
             let mut children = Vec::new();
             for field in &root.fields {
-                children.push(self.resolve_child(field, &prefix, &[], &[])?);
+                children.push(self.resolve_child(field, &prefix, &[], &[], root.builder)?);
             }
 
             let root_name = &root.name;
@@ -78,6 +81,7 @@ impl Generator {
                 children,
                 derives: Vec::new(),
                 aggregate: Some(types),
+                builder: root.builder,
             });
         }
         Ok(self.expand())
@@ -89,13 +93,15 @@ impl Generator {
     /// `prefix` is the aggregate's name (e.g. `CounterAggregate`), which every
     /// nested wrapper name starts with. `ancestors` is the chain of field names
     /// from the root to the field's parent. `derives` are the traits the parent
-    /// derives, which its fields must derive too.
+    /// derives, which its fields must derive too. `builder` is whether the
+    /// aggregate generates builders.
     fn resolve_child(
         &mut self,
         field: &FieldDef,
         prefix: &str,
         ancestors: &[String],
         derives: &[Path],
+        builder: bool,
     ) -> syn::Result<ChildDef> {
         let (container, inner) = match &field.ty {
             TypeDef::Container { path, inner } => (Some(path.clone()), inner.as_ref()),
@@ -134,7 +140,7 @@ impl Generator {
 
         let mut children = Vec::new();
         for child in body.iter().flatten() {
-            children.push(self.resolve_child(child, prefix, &path, &derives)?);
+            children.push(self.resolve_child(child, prefix, &path, &derives, builder)?);
         }
         let root = (!field.rootless).then(|| root_path.clone());
         let has_children = !children.is_empty();
@@ -144,6 +150,7 @@ impl Generator {
             children,
             derives,
             aggregate: None,
+            builder,
         });
 
         Ok(ChildDef {
@@ -175,8 +182,6 @@ impl Generator {
 impl WrapperDef {
     fn expand(&self) -> TokenStream {
         let name = &self.name;
-        let builder = builder_name(name);
-
         let derives = &self.derives;
         let root_field = self.root.as_ref().map(|root| quote!(pub root: #root,));
         let struct_fields: Vec<TokenStream> = self
@@ -188,6 +193,53 @@ impl WrapperDef {
                 quote!(pub #field: #ty,)
             })
             .collect();
+        let mut expanded = quote! {
+            #[derive(Debug, Default)]
+            #[derive(#(#derives),*)]
+            pub struct #name {
+                #root_field
+                #(#struct_fields)*
+            }
+        };
+
+        if let (None, Some(root)) = (&self.aggregate, &self.root) {
+            let rest = if self.children.is_empty() {
+                quote!()
+            } else {
+                quote!(..Default::default())
+            };
+            expanded.extend(quote! {
+                impl ::core::convert::From<#root> for #name {
+                    fn from(root: #root) -> Self {
+                        Self { root, #rest }
+                    }
+                }
+            });
+        }
+
+        if let Some(AggregateTypes { event, error }) = &self.aggregate {
+            let name_str = name.to_string();
+            expanded.extend(quote! {
+                impl ::croisiere::domain::Aggregate for #name {
+                    const NAME: &'static str = #name_str;
+                    type Error = #error;
+                    type Event = #event;
+                }
+            });
+        }
+
+        if self.builder {
+            expanded.extend(self.expand_builder());
+        }
+
+        expanded
+    }
+
+    /// The wrapper's builder, and `builder()` on the aggregate.
+    fn expand_builder(&self) -> TokenStream {
+        let name = &self.name;
+        let builder = builder_name(name);
+
         let builder_root = self.root.as_ref().map(|root| quote!(root: #root,));
         let builder_fields: Vec<TokenStream> = self
             .children
@@ -200,13 +252,6 @@ impl WrapperDef {
             .collect();
 
         let mut expanded = quote! {
-            #[derive(Debug, Default)]
-            #[derive(#(#derives),*)]
-            pub struct #name {
-                #root_field
-                #(#struct_fields)*
-            }
-
             #[derive(Default)]
             pub struct #builder {
                 #builder_root
@@ -251,30 +296,8 @@ impl WrapperDef {
             }
         });
 
-        if let (None, Some(root)) = (&self.aggregate, &self.root) {
-            let rest = if self.children.is_empty() {
-                quote!()
-            } else {
-                quote!(..Default::default())
-            };
+        if self.aggregate.is_some() {
             expanded.extend(quote! {
-                impl ::core::convert::From<#root> for #name {
-                    fn from(root: #root) -> Self {
-                        #builder { root, #rest }.build()
-                    }
-                }
-            });
-        }
-
-        if let Some(AggregateTypes { event, error }) = &self.aggregate {
-            let name_str = name.to_string();
-            expanded.extend(quote! {
-                impl ::croisiere::domain::Aggregate for #name {
-                    const NAME: &'static str = #name_str;
-                    type Error = #error;
-                    type Event = #event;
-                }
-
                 impl #name {
                     pub fn builder() -> #builder {
                         #builder::default()

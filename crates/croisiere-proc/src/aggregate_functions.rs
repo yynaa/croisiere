@@ -24,21 +24,26 @@ pub fn expand(attr: TokenStream, item: ItemImpl) -> syn::Result<TokenStream> {
             use super::#self_name;
             use super::*;
 
+            /// General result of an aggregate function: a `T`, or the
+            /// aggregate's error.
+            #[allow(dead_code)]
+            type AggregateResult<T> = ::std::result::Result<T, #aggregate::Error>;
+
+            /// Result of a check that produces nothing on success, or the
+            /// error that made it fail.
+            #[allow(dead_code)]
+            type CheckResult = AggregateResult<()>;
+
             /// Result of an action on an existing aggregate: the events it
             /// emitted, or the error that prevented it.
             #[allow(dead_code)]
-            type ActionResult = ::std::result::Result<
-                ::std::vec::Vec<#aggregate::Event>,
-                #aggregate::Error,
-            >;
+            type ActionResult = AggregateResult<::std::vec::Vec<#aggregate::Event>>;
 
             /// Result of creating an aggregate: the new aggregate with the
             /// events its creation emitted, or the error that prevented it.
             #[allow(dead_code)]
-            type CreationResult = ::std::result::Result<
-                (#self_name, ::std::vec::Vec<#aggregate::Event>),
-                #aggregate::Error,
-            >;
+            type CreationResult =
+                AggregateResult<(#self_name, ::std::vec::Vec<#aggregate::Event>)>;
 
             #item
         }

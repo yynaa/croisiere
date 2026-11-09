@@ -27,6 +27,7 @@ impl Parse for AggregateInput {
                 fields,
                 event: root.event,
                 error: root.error,
+                builder: !root.no_builder,
             });
             // Trailing commas are optional.
             if !input.is_empty() {
@@ -46,6 +47,8 @@ pub struct NodeDef {
     pub event: Type,
     /// `Aggregate::Error`, from `#[fails = ErrorType]`.
     pub error: Type,
+    /// Whether builders are generated; turned off with `#[no_builder]`.
+    pub builder: bool,
 }
 
 pub struct FieldDef {
@@ -79,6 +82,7 @@ struct RootAttrs {
     alias: Option<Ident>,
     event: Type,
     error: Type,
+    no_builder: bool,
 }
 
 impl RootAttrs {
@@ -86,6 +90,7 @@ impl RootAttrs {
         let mut alias = None;
         let mut event = None;
         let mut error = None;
+        let mut no_builder = false;
         for attr in attrs {
             if attr.path().is_ident("alias") {
                 set_once(&mut alias, attr, parse_alias(attr)?)?;
@@ -93,10 +98,15 @@ impl RootAttrs {
                 set_once(&mut event, attr, parse_value::<Type>(attr)?)?;
             } else if attr.path().is_ident("fails") {
                 set_once(&mut error, attr, parse_value::<Type>(attr)?)?;
+            } else if attr.path().is_ident("no_builder") && matches!(attr.meta, Meta::Path(_)) {
+                if no_builder {
+                    return Err(syn::Error::new_spanned(attr, "duplicate attribute"));
+                }
+                no_builder = true;
             } else {
                 return Err(syn::Error::new_spanned(
                     attr,
-                    "expected `#[alias = Name]`, `#[alias(exact = Name)]`, `#[emits = EventType]` or `#[fails = ErrorType]`",
+                    "expected `#[alias = Name]`, `#[alias(exact = Name)]`, `#[emits = EventType]`, `#[fails = ErrorType]` or `#[no_builder]`",
                 ));
             }
         }
@@ -110,6 +120,7 @@ impl RootAttrs {
             alias,
             event: event.ok_or_else(|| missing("emits"))?,
             error: error.ok_or_else(|| missing("fails"))?,
+            no_builder,
         })
     }
 }

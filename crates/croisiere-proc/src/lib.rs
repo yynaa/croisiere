@@ -181,6 +181,22 @@ use syn::parse_macro_input;
 ///
 /// An `Option<X>` field, as a single value, takes the value and, with children,
 /// the closure: `.maybe(d)` or `.maybe(d, |d| d.e(e))`.
+///
+/// `#[no_builder]` before a root turns builders off for that aggregate: no
+/// `builder()` and no builder types, for the aggregate or its nested wrappers.
+/// Nested wrappers still implement `From` their domain type:
+///
+/// ```ignore
+/// make_aggregate!(
+///     #[no_builder]
+///     #[emits = AEvent]
+///     #[fails = AError]
+///     A { b: B }
+/// );
+/// // pub struct AAggregate { pub root: A, pub b: AAggregateB }
+/// // pub struct AAggregateB { pub root: B }
+/// // impl From<B> for AAggregateB { ... }
+/// ```
 #[proc_macro]
 pub fn make_aggregate(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as make_aggregate::AggregateInput);
@@ -192,10 +208,13 @@ pub fn make_aggregate(input: TokenStream) -> TokenStream {
 /// Wraps the impl block in a snake-cased module derived from the self type,
 /// giving it a convenient scope for aggregate-related helpers.
 ///
-/// It defines two result aliases in that module, built from the event and
+/// It defines result aliases in that module, built from the event and
 /// error types of the self type's `Aggregate` impl (set with `#[emits]`/`#[fails]`
 /// in `make_aggregate!`), so the attribute takes no arguments:
 ///
+/// - `AggregateResult<T>`: general result, returning a `T` or the aggregate's
+///   error.
+/// - `CheckResult`: for checks that return nothing on success.
 /// - `ActionResult`: for actions on an existing aggregate, returning the
 ///   emitted events.
 /// - `CreationResult`: for creating an aggregate, returning it with the
@@ -223,15 +242,14 @@ pub fn make_aggregate(input: TokenStream) -> TokenStream {
 ///     use super::CounterAggregate;
 ///     use super::*;
 ///
-///     type ActionResult = Result<
-///         Vec<<CounterAggregate as Aggregate>::Event>,
-///         <CounterAggregate as Aggregate>::Error,
-///     >;
+///     type AggregateResult<T> = Result<T, <CounterAggregate as Aggregate>::Error>;
 ///
-///     type CreationResult = Result<
-///         (CounterAggregate, Vec<<CounterAggregate as Aggregate>::Event>),
-///         <CounterAggregate as Aggregate>::Error,
-///     >;
+///     type CheckResult = AggregateResult<()>;
+///
+///     type ActionResult = AggregateResult<Vec<<CounterAggregate as Aggregate>::Event>>;
+///
+///     type CreationResult =
+///         AggregateResult<(CounterAggregate, Vec<<CounterAggregate as Aggregate>::Event>)>;
 ///
 ///     impl CounterAggregate {
 ///         fn create() -> CreationResult {
