@@ -7,17 +7,23 @@
 //! - [`#[aggregate_functions]`](macro@aggregate_functions) — `aggregate_functions.rs`
 //! - [`#[derive(ValueObject)]`](derive@ValueObject) — `value_object.rs`
 //! - [`#[derive(Entity)]`](derive@Entity) — `entity.rs`
+//! - [`#[derive(DomainService)]`](derive@DomainService) — `domain_service.rs`
+//! - [`#[domain_service_functions]`](macro@domain_service_functions) — `domain_service_functions.rs`
 //! - [`#[derive(Filter)]`](derive@Filter) — `filter.rs`
 //! - [`#[derive(Sorter)]`](derive@Sorter) — `sorter.rs`
 //! - [`#[derive(Snapshot)]`](derive@Snapshot) — `snapshot.rs`
 //!
 //! `named.rs` holds the expansion shared by the `NAME` derives (`ValueObject`,
 //! `Entity`); `marker.rs` the one shared by the marker derives (`Filter`,
-//! `Sorter`).
+//! `Sorter`); `functions_module.rs` the module wrapping shared by the
+//! `*_functions` attributes.
 
 mod aggregate_functions;
+mod domain_service;
+mod domain_service_functions;
 mod entity;
 mod filter;
+mod functions_module;
 mod make_aggregate;
 mod marker;
 mod named;
@@ -270,6 +276,41 @@ pub fn aggregate_functions(attr: TokenStream, item: TokenStream) -> TokenStream 
         .into()
 }
 
+/// Wraps the impl block in a snake-cased module derived from the self type,
+/// giving it a convenient scope for domain-service-related helpers.
+///
+/// Unlike [`#[aggregate_functions]`](macro@aggregate_functions), it defines no
+/// result aliases, and takes no arguments.
+///
+/// # Example
+///
+/// ```ignore
+/// #[domain_service_functions]
+/// impl TransferService {
+///     fn transfer(&self) {}
+/// }
+/// ```
+///
+/// becomes:
+///
+/// ```ignore
+/// mod transfer_service {
+///     use super::TransferService;
+///     use super::*;
+///
+///     impl TransferService {
+///         fn transfer(&self) {}
+///     }
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn domain_service_functions(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let item = parse_macro_input!(item as syn::ItemImpl);
+    domain_service_functions::expand(attr.into(), item)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
 /// Implements `croisiere::domain::ValueObject` for the annotated type, setting
 /// `NAME` to the type's identifier.
 ///
@@ -311,6 +352,36 @@ pub fn derive_value_object(input: TokenStream) -> TokenStream {
 pub fn derive_entity(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as syn::DeriveInput);
     entity::expand(input).into()
+}
+
+/// Implements `croisiere::domain::DomainService` for the annotated type,
+/// setting `NAME` to the type's identifier and the associated types from the
+/// `#[service(...)]` attribute.
+///
+/// - `event = Type` (required): becomes `DomainService::Event`.
+/// - `error = Type` (required): becomes `DomainService::Error`.
+///
+/// The supertraits (`Debug`, `Default`) still have to be derived alongside it.
+///
+/// # Example
+///
+/// ```ignore
+/// #[derive(Debug, Default, DomainService)]
+/// #[service(event = TransferEvent, error = TransferError)]
+/// pub struct TransferService;
+///
+/// // impl DomainService for TransferService {
+/// //     const NAME: &'static str = "TransferService";
+/// //     type Error = TransferError;
+/// //     type Event = TransferEvent;
+/// // }
+/// ```
+#[proc_macro_derive(DomainService, attributes(service))]
+pub fn derive_domain_service(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as syn::DeriveInput);
+    domain_service::expand(input)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
 }
 
 /// Implements the `croisiere::application::Filter` marker trait for
