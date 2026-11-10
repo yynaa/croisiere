@@ -1,0 +1,5 @@
+error: duplicate argument
+ --> tests/ui/derives/service_duplicate_argument.rs:7:22
+  |
+7 | #[service(event = E, event = E, error = F)]
+  |                      ^^^^^

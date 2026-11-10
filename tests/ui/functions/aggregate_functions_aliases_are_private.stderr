@@ -1,0 +1,12 @@
+error[E0603]: type alias `ActionResult` is private
+  --> tests/ui/functions/aggregate_functions_aliases_are_private.rs:15:34
+   |
+15 | type Leaked = counter_aggregate::ActionResult;
+   |                                  ^^^^^^^^^^^^ private type alias
+   |
+note: the type alias `ActionResult` is defined here
+  --> tests/ui/functions/aggregate_functions_aliases_are_private.rs:12:1
+   |
+12 | #[croisiere::domain::aggregate_functions]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = note: this error originates in the attribute macro `croisiere::domain::aggregate_functions` (in Nightly builds, run with -Z macro-backtrace for more info)

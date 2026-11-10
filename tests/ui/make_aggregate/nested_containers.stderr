@@ -1,0 +1,5 @@
+error: nested containers are not supported
+  --> tests/ui/make_aggregate/nested_containers.rs:15:9
+   |
+15 |     A { b: Vec<Option<B>> }
+   |         ^

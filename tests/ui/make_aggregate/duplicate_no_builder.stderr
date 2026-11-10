@@ -1,0 +1,5 @@
+error: duplicate attribute
+  --> tests/ui/make_aggregate/duplicate_no_builder.rs:14:5
+   |
+14 |     #[no_builder]
+   |     ^^^^^^^^^^^^^

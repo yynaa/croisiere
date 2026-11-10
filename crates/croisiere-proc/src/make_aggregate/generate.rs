@@ -1,6 +1,6 @@
 //! Code generation for `make_aggregate!`.
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote, ToTokens};
@@ -49,7 +49,9 @@ struct AggregateTypes {
 #[derive(Default)]
 pub struct Generator {
     wrappers: Vec<WrapperDef>,
-    seen: HashSet<String>,
+    /// Name of every wrapper generated so far, with the path of the node it
+    /// was generated for (e.g. `A.c.d`), to report name collisions.
+    seen: HashMap<String, String>,
 }
 
 impl Generator {
@@ -62,12 +64,20 @@ impl Generator {
                 None => format_ident!("{}Aggregate", root.name),
             };
             let prefix = wrapper.to_string();
+            let node_path = root.name.to_string();
 
             // Children of the root start with an empty path: their wrapper
             // names are `<aggregate name><field name>`.
             let mut children = Vec::new();
             for field in &root.fields {
-                children.push(self.resolve_child(field, &prefix, &[], &[], root.builder)?);
+                children.push(self.resolve_child(
+                    field,
+                    &prefix,
+                    &[],
+                    &node_path,
+                    &[],
+                    root.builder,
+                )?);
             }
 
             let root_name = &root.name;
@@ -75,14 +85,18 @@ impl Generator {
                 event: root.event.clone(),
                 error: root.error.clone(),
             };
-            self.push(WrapperDef {
-                name: wrapper,
-                root: Some(quote!(#root_name)),
-                children,
-                derives: Vec::new(),
-                aggregate: Some(types),
-                builder: root.builder,
-            });
+            self.push(
+                WrapperDef {
+                    name: wrapper,
+                    root: Some(quote!(#root_name)),
+                    children,
+                    derives: Vec::new(),
+                    aggregate: Some(types),
+                    builder: root.builder,
+                },
+                root.alias.as_ref().unwrap_or(&root.name),
+                node_path,
+            )?;
         }
         Ok(self.expand())
     }
@@ -92,14 +106,17 @@ impl Generator {
     ///
     /// `prefix` is the aggregate's name (e.g. `CounterAggregate`), which every
     /// nested wrapper name starts with. `ancestors` is the chain of field names
-    /// from the root to the field's parent. `derives` are the traits the parent
-    /// derives, which its fields must derive too. `builder` is whether the
+    /// from the root to the field's parent, in PascalCase. `parent_path` is the
+    /// parent's path as written (e.g. `A.c`), for error messages. `derives` are
+    /// the traits the parent derives, which its fields must derive too.
+    /// `builder` is whether the
     /// aggregate generates builders.
     fn resolve_child(
         &mut self,
         field: &FieldDef,
         prefix: &str,
         ancestors: &[String],
+        parent_path: &str,
         derives: &[Path],
         builder: bool,
     ) -> syn::Result<ChildDef> {
@@ -137,21 +154,26 @@ impl Generator {
         let mut path = ancestors.to_vec();
         path.push(pascal_case(&field.name));
         let wrapper = format_ident!("{}{}", prefix, path.concat());
+        let node_path = format!("{parent_path}.{}", field.name.unraw());
 
         let mut children = Vec::new();
         for child in body.iter().flatten() {
-            children.push(self.resolve_child(child, prefix, &path, &derives, builder)?);
+            children.push(self.resolve_child(child, prefix, &path, &node_path, &derives, builder)?);
         }
         let root = (!field.rootless).then(|| root_path.clone());
         let has_children = !children.is_empty();
-        self.push(WrapperDef {
-            name: wrapper.clone(),
-            root: root.clone(),
-            children,
-            derives,
-            aggregate: None,
-            builder,
-        });
+        self.push(
+            WrapperDef {
+                name: wrapper.clone(),
+                root: root.clone(),
+                children,
+                derives,
+                aggregate: None,
+                builder,
+            },
+            &field.name,
+            node_path,
+        )?;
 
         Ok(ChildDef {
             name: field.name.clone(),
@@ -163,11 +185,36 @@ impl Generator {
         })
     }
 
-    fn push(&mut self, wrapper: WrapperDef) {
-        // Identical paths resolve to the same wrapper; only emit it once.
-        if self.seen.insert(wrapper.name.to_string()) {
-            self.wrappers.push(wrapper);
+    /// Adds a wrapper to the output, generated for the node at `node_path`
+    /// and written at `span`.
+    ///
+    /// Two nodes can't share a wrapper name: different paths can concatenate
+    /// to the same name (`foo_bar` and `foo { bar }` both give `FooBar`), and
+    /// keeping only one of them would silently give the other the wrong root
+    /// type or derives.
+    fn push(&mut self, wrapper: WrapperDef, span: &Ident, node_path: String) -> syn::Result<()> {
+        let name = wrapper.name.to_string();
+        if let Some(previous) = self.seen.get(&name) {
+            let message = if *previous == node_path {
+                format!("`{node_path}` is declared twice")
+            } else {
+                // Root paths have no `.`. `#[alias]` renames a whole aggregate,
+                // so it only helps when one of the two is an aggregate.
+                let hint = if node_path.contains('.') && previous.contains('.') {
+                    "rename one of the fields"
+                } else {
+                    "rename one of them or use `#[alias]`"
+                };
+                format!(
+                    "`{node_path}` and `{previous}` would both generate the wrapper \
+                     `{name}`; {hint}"
+                )
+            };
+            return Err(syn::Error::new_spanned(span, message));
         }
+        self.seen.insert(name, node_path);
+        self.wrappers.push(wrapper);
+        Ok(())
     }
 
     fn expand(self) -> TokenStream {

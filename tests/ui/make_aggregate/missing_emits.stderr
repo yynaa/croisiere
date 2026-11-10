@@ -1,0 +1,5 @@
+error: missing `#[emits = ...]` on the aggregate root `A`
+  --> tests/ui/make_aggregate/missing_emits.rs:14:5
+   |
+14 |     A
+   |     ^

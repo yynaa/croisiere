@@ -1,0 +1,5 @@
+error: domain_service_functions only supports plain path types
+  --> tests/ui/functions/domain_service_functions_on_non_path_type.rs:11:6
+   |
+11 | impl (Transfer, Transfer) {}
+   |      ^^^^^^^^^^^^^^^^^^^^

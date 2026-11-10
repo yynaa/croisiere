@@ -1,0 +1,16 @@
+error[E0277]: the trait bound `AAggregate: From<A>` is not satisfied
+  --> tests/ui/make_aggregate/aggregate_has_no_from.rs:19:27
+   |
+19 |     let _: AAggregate = A.into();
+   |                           ^^^^ unsatisfied trait bound
+   |
+help: the trait `From<A>` is not implemented for `AAggregate`
+  --> tests/ui/make_aggregate/aggregate_has_no_from.rs:12:1
+   |
+12 | / make_aggregate!(
+13 | |     #[emits = E]
+14 | |     #[fails = F]
+15 | |     A
+   | |_____^
+   = note: required for `A` to implement `Into<AAggregate>`
+   = note: this error originates in the macro `make_aggregate` (in Nightly builds, run with -Z macro-backtrace for more info)

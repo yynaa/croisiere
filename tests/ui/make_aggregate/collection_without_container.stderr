@@ -1,0 +1,5 @@
+error: `#[collection]` needs a container type, such as `Vec<...>`
+  --> tests/ui/make_aggregate/collection_without_container.rs:15:23
+   |
+15 |     A { #[collection] b: B }
+   |                       ^

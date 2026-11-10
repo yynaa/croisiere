@@ -1,0 +1,5 @@
+error: missing `#[service(event = ..., error = ...)]` attribute
+ --> tests/ui/derives/service_missing_attribute.rs:8:12
+  |
+8 | pub struct Transfer;
+  |            ^^^^^^^^

@@ -1,0 +1,5 @@
+error: missing required `aggregate = ...` argument
+  --> tests/ui/derives/snapshot_missing_aggregate.rs:27:1
+   |
+27 | #[snapshot(filter = croisiere::application::EmptyFilter)]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

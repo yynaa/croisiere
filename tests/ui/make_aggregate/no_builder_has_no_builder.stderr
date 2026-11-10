@@ -1,0 +1,18 @@
+error[E0599]: no associated function or constant named `builder` found for struct `AAggregate` in the current scope
+  --> tests/ui/make_aggregate/no_builder_has_no_builder.rs:20:25
+   |
+12 | / make_aggregate!(
+13 | |     #[no_builder]
+14 | |     #[emits = E]
+15 | |     #[fails = F]
+16 | |     A { b: B { c: C } }
+   | |_____- associated function or constant `builder` not found for this struct
+...
+20 |       let _ = AAggregate::builder();
+   |                           ^^^^^^^ associated function or constant not found in `AAggregate`
+
+error[E0433]: cannot find type `AAggregateBBuilder` in this scope
+  --> tests/ui/make_aggregate/no_builder_has_no_builder.rs:21:13
+   |
+21 |     let _ = AAggregateBBuilder::default();
+   |             ^^^^^^^^^^^^^^^^^^ use of undeclared type `AAggregateBBuilder`

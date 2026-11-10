@@ -1,0 +1,5 @@
+error: expected `#[rootless]`, `#[collection]` or `#[derive(...)]` on a field
+  --> tests/ui/make_aggregate/unknown_field_attribute.rs:15:9
+   |
+15 |     A { #[optional] b: B }
+   |         ^^^^^^^^^^^

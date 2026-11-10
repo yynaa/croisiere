@@ -1,0 +1,5 @@
+error: duplicate argument
+  --> tests/ui/derives/snapshot_duplicate_argument.rs:27:40
+   |
+27 | #[snapshot(aggregate = OrderAggregate, aggregate = OrderAggregate)]
+   |                                        ^^^^^^^^^

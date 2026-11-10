@@ -1,0 +1,5 @@
+error: domain_service_functions takes no arguments
+  --> tests/ui/functions/domain_service_functions_with_arguments.rs:10:47
+   |
+10 | #[croisiere::domain::domain_service_functions(event = E)]
+   |                                               ^^^^^^^^^

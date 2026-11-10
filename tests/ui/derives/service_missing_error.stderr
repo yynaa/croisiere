@@ -1,0 +1,5 @@
+error: missing required `error = ...` argument
+ --> tests/ui/derives/service_missing_error.rs:7:1
+  |
+7 | #[service(event = E)]
+  | ^^^^^^^^^^^^^^^^^^^^^

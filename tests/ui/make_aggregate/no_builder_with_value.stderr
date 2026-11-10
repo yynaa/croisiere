@@ -1,0 +1,5 @@
+error: expected `#[alias = Name]`, `#[alias(exact = Name)]`, `#[emits = EventType]`, `#[fails = ErrorType]` or `#[no_builder]`
+  --> tests/ui/make_aggregate/no_builder_with_value.rs:13:5
+   |
+13 |     #[no_builder = true]
+   |     ^^^^^^^^^^^^^^^^^^^^

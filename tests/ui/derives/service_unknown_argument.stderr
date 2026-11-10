@@ -1,0 +1,5 @@
+error: expected `event` or `error`
+ --> tests/ui/derives/service_unknown_argument.rs:7:33
+  |
+7 | #[service(event = E, error = F, name = X)]
+  |                                 ^^^^

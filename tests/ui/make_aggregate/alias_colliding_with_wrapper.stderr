@@ -1,0 +1,5 @@
+error: `C` and `A.b` would both generate the wrapper `AAggregateB`; rename one of them or use `#[alias]`
+  --> tests/ui/make_aggregate/alias_colliding_with_wrapper.rs:17:21
+   |
+17 |     #[alias(exact = AAggregateB)]
+   |                     ^^^^^^^^^^^

@@ -1,0 +1,50 @@
+error[E0277]: the trait bound `Money: Hash` is not satisfied
+ --> tests/ui/derives/value_object_missing_supertraits.rs:4:12
+  |
+4 | pub struct Money;
+  |            ^^^^^ the trait `Hash` is not implemented for `Money`
+  |
+note: required by a bound in `ValueObject`
+ --> src/domain/value_object.rs
+  |
+  | pub trait ValueObject: Debug + Clone + PartialEq + Eq + Default + Hash {
+  |                                                                   ^^^^ required by this bound in `ValueObject`
+help: consider annotating `Money` with `#[derive(Hash)]`
+  |
+4 + #[derive(Hash)]
+5 | pub struct Money;
+  |
+
+error[E0277]: the trait bound `Money: Eq` is not satisfied
+ --> tests/ui/derives/value_object_missing_supertraits.rs:4:12
+  |
+4 | pub struct Money;
+  |            ^^^^^ the trait `Eq` is not implemented for `Money`
+  |
+note: required by a bound in `ValueObject`
+ --> src/domain/value_object.rs
+  |
+  | pub trait ValueObject: Debug + Clone + PartialEq + Eq + Default + Hash {
+  |                                                    ^^ required by this bound in `ValueObject`
+help: consider annotating `Money` with `#[derive(Eq)]`
+  |
+4 + #[derive(Eq)]
+5 | pub struct Money;
+  |
+
+error[E0277]: the trait bound `Money: Clone` is not satisfied
+ --> tests/ui/derives/value_object_missing_supertraits.rs:4:12
+  |
+4 | pub struct Money;
+  |            ^^^^^ the trait `Clone` is not implemented for `Money`
+  |
+note: required by a bound in `ValueObject`
+ --> src/domain/value_object.rs
+  |
+  | pub trait ValueObject: Debug + Clone + PartialEq + Eq + Default + Hash {
+  |                                ^^^^^ required by this bound in `ValueObject`
+help: consider annotating `Money` with `#[derive(Clone)]`
+  |
+4 + #[derive(Clone)]
+5 | pub struct Money;
+  |

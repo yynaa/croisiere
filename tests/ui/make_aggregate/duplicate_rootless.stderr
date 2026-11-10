@@ -1,0 +1,5 @@
+error: duplicate attribute
+  --> tests/ui/make_aggregate/duplicate_rootless.rs:15:21
+   |
+15 |     A { #[rootless] #[rootless] b: B { c: C } }
+   |                     ^^^^^^^^^^^

@@ -1,0 +1,5 @@
+error: `A.b.c` and `A.b_c` would both generate the wrapper `AAggregateBC`; rename one of the fields
+  --> tests/ui/make_aggregate/colliding_field_paths.rs:15:24
+   |
+15 |     A { b_c: B, b: B { c: C } }
+   |                        ^

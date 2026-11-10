@@ -1,0 +1,5 @@
+error: missing `#[snapshot(aggregate = ...)]` attribute
+  --> tests/ui/derives/snapshot_missing_attribute.rs:28:12
+   |
+28 | pub struct OrderSnapshot;
+   |            ^^^^^^^^^^^^^

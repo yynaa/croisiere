@@ -1,0 +1,16 @@
+error[E0277]: the trait bound `Customer: Default` is not satisfied
+ --> tests/ui/derives/entity_missing_default.rs:4:12
+  |
+4 | pub struct Customer;
+  |            ^^^^^^^^ the trait `Default` is not implemented for `Customer`
+  |
+note: required by a bound in `Entity`
+ --> src/domain/entity.rs
+  |
+  | pub trait Entity: Debug + Default {
+  |                           ^^^^^^^ required by this bound in `Entity`
+help: consider annotating `Customer` with `#[derive(Default)]`
+  |
+4 + #[derive(Default)]
+5 | pub struct Customer;
+  |

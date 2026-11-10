@@ -1,0 +1,5 @@
+error: aggregate_functions takes no arguments; event and error types come from `#[emits]`/`#[fails]` in make_aggregate!
+  --> tests/ui/functions/aggregate_functions_with_arguments.rs:12:42
+   |
+12 | #[croisiere::domain::aggregate_functions(event = E)]
+   |                                          ^^^^^^^^^

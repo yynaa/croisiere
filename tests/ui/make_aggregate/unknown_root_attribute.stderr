@@ -1,0 +1,5 @@
+error: expected `#[alias = Name]`, `#[alias(exact = Name)]`, `#[emits = EventType]`, `#[fails = ErrorType]` or `#[no_builder]`
+  --> tests/ui/make_aggregate/unknown_root_attribute.rs:13:5
+   |
+13 |     #[serde]
+   |     ^^^^^^^^

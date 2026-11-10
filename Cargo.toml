@@ -13,3 +13,6 @@ members = ["crates/croisiere-proc", "crates/croisiere-example"]
 syn = { version = "3.0.10", features = ["full"] }
 quote = "1.0.47"
 proc-macro2 = "1.0.107"
+
+[dev-dependencies]
+trybuild = "1"

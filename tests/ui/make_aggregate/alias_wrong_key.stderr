@@ -1,0 +1,5 @@
+error: expected `exact`
+  --> tests/ui/make_aggregate/alias_wrong_key.rs:13:13
+   |
+13 |     #[alias(name = X)]
+   |             ^^^^

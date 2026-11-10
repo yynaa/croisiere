@@ -1,0 +1,5 @@
+error: a `#[rootless]` field cannot be a collection
+  --> tests/ui/make_aggregate/rootless_collection.rs:15:35
+   |
+15 |     A { #[rootless] #[collection] b: Vec<B> }
+   |                                   ^

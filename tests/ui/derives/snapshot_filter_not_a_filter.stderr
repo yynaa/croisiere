@@ -1,0 +1,17 @@
+error[E0277]: the trait bound `String: croisiere::application::Filter` is not satisfied
+  --> tests/ui/derives/snapshot_filter_not_a_filter.rs:27:49
+   |
+27 | #[snapshot(aggregate = OrderAggregate, filter = String)]
+   |                                                 ^^^^^^ the trait `croisiere::application::Filter` is not implemented for `String`
+   |
+help: the trait `croisiere::application::Filter` is implemented for `EmptyFilter`
+  --> src/application/snapshot.rs
+   |
+   | #[derive(Hash, Filter)]
+   |                ^^^^^^
+note: required by a bound in `croisiere::application::Snapshot::Filter`
+  --> src/application/snapshot.rs
+   |
+   |     type Filter: Filter;
+   |                  ^^^^^^ required by this bound in `Snapshot::Filter`
+   = note: this error originates in the derive macro `Filter` (in Nightly builds, run with -Z macro-backtrace for more info)

@@ -1,0 +1,5 @@
+error: expected `:`
+  --> tests/ui/make_aggregate/missing_colon.rs:15:11
+   |
+15 |     A { b B }
+   |           ^

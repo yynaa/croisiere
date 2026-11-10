@@ -1,0 +1,5 @@
+error: only one `#[snapshot(...)]` attribute is allowed
+  --> tests/ui/derives/snapshot_two_attributes.rs:28:1
+   |
+28 | #[snapshot(filter = croisiere::application::EmptyFilter)]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

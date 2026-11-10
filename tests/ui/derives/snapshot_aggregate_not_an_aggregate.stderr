@@ -1,0 +1,64 @@
+error[E0277]: the trait bound `Order: Aggregate` is not satisfied
+  --> tests/ui/derives/snapshot_aggregate_not_an_aggregate.rs:27:24
+   |
+27 | #[snapshot(aggregate = Order)]
+   |                        ^^^^^ unsatisfied trait bound
+   |
+help: the trait `Aggregate` is not implemented for `Order`
+  --> tests/ui/derives/snapshot_aggregate_not_an_aggregate.rs:4:1
+   |
+ 4 | pub struct Order;
+   | ^^^^^^^^^^^^^^^^
+help: the trait `Aggregate` is implemented for `OrderAggregate`
+  --> tests/ui/derives/snapshot_aggregate_not_an_aggregate.rs:8:1
+   |
+ 8 | / croisiere::domain::make_aggregate!(
+ 9 | |     #[emits = E]
+10 | |     #[fails = F]
+11 | |     Order
+   | |_________^
+note: required by a bound in `croisiere::application::Snapshot::Aggregate`
+  --> src/application/snapshot.rs
+   |
+   |     type Aggregate: Aggregate;
+   |                     ^^^^^^^^^ required by this bound in `Snapshot::Aggregate`
+   = note: this error originates in the macro `croisiere::domain::make_aggregate` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `OrderSnapshot: From<Order>` is not satisfied
+  --> tests/ui/derives/snapshot_aggregate_not_an_aggregate.rs:28:12
+   |
+28 | pub struct OrderSnapshot;
+   |            ^^^^^^^^^^^^^ unsatisfied trait bound
+   |
+help: the trait `From<Order>` is not implemented for `OrderSnapshot`
+      but trait `From<OrderAggregate>` is implemented for it
+  --> tests/ui/derives/snapshot_aggregate_not_an_aggregate.rs:14:1
+   |
+14 | impl From<OrderAggregate> for OrderSnapshot {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = help: for that trait implementation, expected `OrderAggregate`, found `Order`
+note: required by a bound in `Snapshot`
+  --> src/application/snapshot.rs
+   |
+   | pub trait Snapshot: Debug + Clone + From<Self::Aggregate> + TryInto<Self::Aggregate> {
+   |                                     ^^^^^^^^^^^^^^^^^^^^^ required by this bound in `Snapshot`
+
+error[E0277]: the trait bound `Order: From<OrderSnapshot>` is not satisfied
+  --> tests/ui/derives/snapshot_aggregate_not_an_aggregate.rs:28:12
+   |
+28 | pub struct OrderSnapshot;
+   |            ^^^^^^^^^^^^^ unsatisfied trait bound
+   |
+help: the trait `From<OrderSnapshot>` is not implemented for `Order`
+  --> tests/ui/derives/snapshot_aggregate_not_an_aggregate.rs:4:1
+   |
+ 4 | pub struct Order;
+   | ^^^^^^^^^^^^^^^^
+   = note: required for `OrderSnapshot` to implement `Into<Order>`
+   = note: required for `Order` to implement `TryFrom<OrderSnapshot>`
+   = note: required for `OrderSnapshot` to implement `TryInto<Order>`
+note: required by a bound in `Snapshot`
+  --> src/application/snapshot.rs
+   |
+   | pub trait Snapshot: Debug + Clone + From<Self::Aggregate> + TryInto<Self::Aggregate> {
+   |                                                             ^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `Snapshot`

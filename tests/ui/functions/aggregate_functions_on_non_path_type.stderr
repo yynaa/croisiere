@@ -1,0 +1,5 @@
+error: aggregate_functions only supports plain path types
+  --> tests/ui/functions/aggregate_functions_on_non_path_type.rs:13:6
+   |
+13 | impl (CounterAggregate, CounterAggregate) {}
+   |      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

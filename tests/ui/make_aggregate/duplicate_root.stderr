@@ -1,0 +1,5 @@
+error: `A` is declared twice
+  --> tests/ui/make_aggregate/duplicate_root.rs:19:5
+   |
+19 |     A
+   |     ^

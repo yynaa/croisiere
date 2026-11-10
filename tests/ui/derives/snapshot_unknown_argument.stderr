@@ -1,0 +1,5 @@
+error: expected `aggregate`, `filter` or `sorter`
+  --> tests/ui/derives/snapshot_unknown_argument.rs:27:40
+   |
+27 | #[snapshot(aggregate = OrderAggregate, name = X)]
+   |                                        ^^^^
