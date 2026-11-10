@@ -49,6 +49,7 @@ pub trait WriteRepository<S: Snapshot> {
 }
 
 /// A snapshot together with its version, as stored by repositories.
+#[derive(Clone)]
 pub struct VersionedSnapshot<S>
 where
     S: Snapshot,

@@ -11,7 +11,7 @@ use crate::domain::Aggregate;
 /// Implement it with `#[derive(Snapshot)]`, giving the associated types with
 /// the `#[snapshot(aggregate = ..., filter = ..., sorter = ...)]` attribute;
 /// `filter` and `sorter` default to [`EmptyFilter`] and [`EmptySorter`].
-pub trait Snapshot: Debug + From<Self::Aggregate> + TryInto<Self::Aggregate> {
+pub trait Snapshot: Debug + Clone + From<Self::Aggregate> + TryInto<Self::Aggregate> {
     /// Name of the snapshot type, set to the type's identifier by the derive.
     const NAME: &'static str;
     /// The aggregate this snapshot is taken of.

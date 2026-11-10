@@ -1,12 +1,8 @@
 use croisiere::application::{Filter, Snapshot, Sorter};
 
-use crate::domain::{
-    aggregates::CounterAggregate,
-    entities::Counter,
-    value_objects::CounterData,
-};
+use crate::domain::{aggregates::CounterAggregate, entities::Counter, value_objects::CounterData};
 
-#[derive(Debug, Snapshot)]
+#[derive(Debug, Clone, Snapshot)]
 #[snapshot(aggregate = CounterAggregate, filter = CounterFilter, sorter = CounterSorter)]
 pub struct CounterSnapshot {
     pub name: String,
