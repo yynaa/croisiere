@@ -2,8 +2,15 @@ use std::fmt::Debug;
 
 /// Entity, as defined by DDD.
 ///
-/// It has a lifecycle, and cannot contain other entities or value objects:
-/// those links are made by an [`Aggregate`](crate::domain::Aggregate).
+/// It has an identity and a lifecycle: two entities with the same fields are
+/// still two different entities.
+///
+/// It can contain value objects and other entities. Be thoughtful about which
+/// ones you embed: an embedded entity lives and changes along with the one
+/// containing it. Links between entities that live independently are made by
+/// an [`Aggregate`](crate::domain::Aggregate).
+///
+/// Value objects cannot contain entities.
 ///
 /// Implement it with `#[derive(Entity)]`, alongside the derives for its
 /// supertraits.

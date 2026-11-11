@@ -3,8 +3,13 @@ use std::{fmt::Debug, hash::Hash};
 /// Value Object, as defined by DDD
 ///
 /// It has no identity: two value objects with the same fields are equal, hence
-/// the [`PartialEq`], [`Eq`] and [`Hash`] bounds. It cannot contain other value
-/// objects.
+/// the [`PartialEq`], [`Eq`] and [`Hash`] bounds.
+///
+/// It can contain other value objects. Be thoughtful about which ones you
+/// embed: an embedded value object is part of this one's value, and is
+/// compared, hashed and replaced along with it.
+///
+/// It cannot contain entities.
 ///
 /// Implement it with `#[derive(ValueObject)]`, alongside the derives for its
 /// supertraits.
