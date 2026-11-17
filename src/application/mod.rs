@@ -2,13 +2,14 @@
 //! aggregates and how they are persisted.
 
 mod cqrs;
-mod event_services;
+mod jobs;
 mod persistence;
 mod snapshot;
 
 pub use cqrs::Command;
 pub use cqrs::Query;
-pub use event_services::EventService;
+pub use jobs::EventService;
+pub use jobs::Job;
 pub use persistence::AbstractActionableSnapshot;
 pub use persistence::ActionableSnapshot;
 pub use persistence::Pagination;

@@ -7,7 +7,9 @@ upon the ones it cares about, and emits other events in response.
 their changes are stored. Event services are on the other end: notifying someone when money is
 deposited, updating a read model, starting the next step of a longer process.
 
-In `croisiere`, event services are described by the [`EventService`] trait.
+In `croisiere`, event services are jobs: [`EventService`] extends the [`Job`] trait. A job acts on
+aggregates or domain services and returns the events it emitted. An event service is a job that
+reacts to events read from a bus.
 
 ## The events of the application
 
@@ -80,19 +82,25 @@ Each event service gets its own reader of the broadcast to read from, and the bu
 ## The trait
 
 ```rust,ignore
-pub trait EventService {
+pub trait Job {
     type Event;
     type Error;
 
     fn handle(&mut self) -> Result<Vec<Self::Event>, Self::Error>;
 }
+
+pub trait EventService: Job {}
 ```
 
 | Item     | What it is                                                                         |
 |----------|------------------------------------------------------------------------------------|
-| `Event`  | The events the service reads, and emits in response.                               |
-| `Error`  | What the service returns when handling fails.                                      |
-| `handle` | Reads the pending events, acts upon the relevant ones, and returns what it emitted. |
+| `Event`  | The events the job emits in response.                                               |
+| `Error`  | What the job returns when handling fails.                                           |
+| `handle` | Acts on aggregates or domain services and returns the events emitted in response.   |
+
+These items belong to `Job`. `EventService` is a marker trait: it adds no methods or associated
+types. Implement `Job` for the service's behavior, then `EventService` to mark it as reacting to
+events. The bus and the events it reads are provided by the implementation.
 
 ## Writing an event service
 
@@ -100,14 +108,14 @@ Here is a service turning every deposit into a notification:
 
 ```rust,ignore
 use bus::BusReader;
-use croisiere::application::EventService;
+use croisiere::application::{EventService, Job};
 
 pub struct DepositNotifier {
     pub reader: BusReader<AppEvent>,
     pub bus: EventBus,
 }
 
-impl EventService for DepositNotifier {
+impl Job for DepositNotifier {
     type Event = AppEvent;
     type Error = AppError;
 
@@ -125,6 +133,8 @@ impl EventService for DepositNotifier {
         Ok(emitted)
     }
 }
+
+impl EventService for DepositNotifier {}
 ```
 
 `try_recv` reads the events waiting for the service without blocking, so `handle` returns once they
@@ -192,5 +202,6 @@ std::thread::spawn(move || -> Result<(), AppError> {
 ```
 
 [`EventService`]: https://docs.rs/croisiere/latest/croisiere/application/trait.EventService.html
+[`Job`]: https://docs.rs/croisiere/latest/croisiere/application/trait.Job.html
 [`crossbeam-channel`]: https://docs.rs/crossbeam-channel/latest/crossbeam_channel/
 [`bus`]: https://docs.rs/bus/latest/bus/
