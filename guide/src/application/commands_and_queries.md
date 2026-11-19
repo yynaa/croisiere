@@ -46,12 +46,14 @@ pub type Uow = Box<dyn UnitOfWork<Error = RepositoryError, Registry = Registry>>
 The request then reaches the repositories through its [registry](./units_of_work.md#the-registry).
 
 A query only needs the unit of work. A command also needs somewhere to send the events its aggregates
-emit: the [event bus](./event_services.md#the-event-bus), which sends them to every event service.
+emit: the [event bus](./event_bus.md), which sends them to every event service.
 
 ```rust,ignore
+use croisiere::application::{EventBus, EventBusSender};
+
 pub struct CommandContext {
     pub uow: Uow,
-    pub bus: EventBus,
+    pub bus: EventBusSender<AppEvent>,
 }
 ```
 
@@ -114,7 +116,7 @@ impl Command for Deposit {
         context.uow.commit_and_rollback()?;
 
         for event in events {
-            context.bus.publish(event)?;
+            context.bus.send(event).map_err(|_| AppError::BusClosed)?;
         }
         Ok(CommandResponse::Ok)
     }
@@ -159,7 +161,7 @@ impl Command for OpenAccount {
         context.uow.commit_and_rollback()?;
 
         for event in events {
-            context.bus.publish(event.into())?;
+            context.bus.send(event.into()).map_err(|_| AppError::BusClosed)?;
         }
         Ok(CommandResponse::Created)
     }
@@ -224,13 +226,13 @@ Whoever receives requests from the outside world, such as a web server or a comm
 starts a unit of work and hands it to the request:
 
 ```rust,ignore
-pub fn execute<C>(factory: &Factory, bus: &EventBus, command: C) -> Result<C::Response, C::Error>
+pub fn execute<C>(factory: &Factory, bus: &EventBus<AppEvent>, command: C) -> Result<C::Response, C::Error>
 where
     C: Command<Context = CommandContext>,
 {
     command.handle(CommandContext {
         uow: factory.begin(),
-        bus: bus.clone(),
+        bus: bus.sender(),
     })
 }
 

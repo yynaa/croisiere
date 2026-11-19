@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 croisiere-proc = { path = "crates/croisiere-proc" }
+crossbeam-channel = { workspace = true }
 
 [workspace]
 members = ["crates/croisiere-proc", "crates/croisiere-example"]
@@ -13,6 +14,7 @@ members = ["crates/croisiere-proc", "crates/croisiere-example"]
 syn = { version = "3.0.10", features = ["full"] }
 quote = "1.0.47"
 proc-macro2 = "1.0.107"
+crossbeam-channel = "0.5.17"
 
 [dev-dependencies]
 trybuild = "1"

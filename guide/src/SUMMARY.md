@@ -10,6 +10,7 @@
   - [Repositories](./application/repositories.md)
   - [Units of Work](./application/units_of_work.md)
   - [Commands & Queries](./application/commands_and_queries.md)
+  - [Event Bus](./application/event_bus.md)
   - [Event Services](./application/event_services.md)
 - [Seaport: Infrastructure](./infrastructure.md)
   - [Repositories](./infrastructure/repositories.md)

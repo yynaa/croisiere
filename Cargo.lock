@@ -13,6 +13,7 @@ name = "croisiere"
 version = "0.1.0"
 dependencies = [
  "croisiere-proc",
+ "crossbeam-channel",
  "trybuild",
 ]
 

@@ -49,35 +49,9 @@ pub struct Envelope {
 
 ## The event bus
 
-Every event service must see every event, and both commands and event services publish events. The
-bus is therefore a broadcast channel with several senders, built from two crates:
-
-- a [`crossbeam-channel`] channel, whose sender can be cloned for every publisher;
-- a [`bus`] broadcast, which gives every event to each of its readers.
-
-A relay moves events from the first to the second. Publishers only ever see the sending end:
-
-```rust,ignore
-use crossbeam_channel::Sender;
-
-/// Where commands and event services publish events.
-#[derive(Clone)]
-pub struct EventBus {
-    sender: Sender<AppEvent>,
-}
-
-impl EventBus {
-    pub fn new(sender: Sender<AppEvent>) -> Self {
-        Self { sender }
-    }
-
-    pub fn publish(&self, event: AppEvent) -> Result<(), AppError> {
-        self.sender.send(event).map_err(|_| AppError::BusClosed)
-    }
-}
-```
-
-Each event service gets its own reader of the broadcast to read from, and the bus to emit through.
+Use [`EventBus<AppEvent>`](./event_bus.md) to broadcast the application's events. Each event service
+gets its own `EventBusReader<AppEvent>` to read from and an `EventBusSender<AppEvent>` to emit through.
+Keep the bus alive for as long as the services need it.
 
 ## The trait
 
@@ -107,12 +81,11 @@ events. The bus and the events it reads are provided by the implementation.
 Here is a service turning every deposit into a notification:
 
 ```rust,ignore
-use bus::BusReader;
-use croisiere::application::{EventService, Job};
+use croisiere::application::{EventBusReader, EventBusSender, EventService, Job};
 
 pub struct DepositNotifier {
-    pub reader: BusReader<AppEvent>,
-    pub bus: EventBus,
+    pub reader: EventBusReader<AppEvent>,
+    pub bus: EventBusSender<AppEvent>,
 }
 
 impl Job for DepositNotifier {
@@ -126,7 +99,7 @@ impl Job for DepositNotifier {
                 let notification = AppEvent::Notification {
                     message: format!("{cents} cents were deposited on account {id}"),
                 };
-                self.bus.publish(notification.clone())?;
+                self.bus.send(notification.clone()).map_err(|_| AppError::BusClosed)?;
                 emitted.push(notification);
             }
         }
@@ -152,40 +125,28 @@ A service that needs to change the application, rather than only emit events, ca
 
 ## Running event services
 
-Create the channel and the broadcast once. Add one reader per service, then start the relay, which
-broadcasts every event published on the channel:
+Create the bus once and subscribe each service before publishing events:
 
 ```rust,ignore
-use bus::Bus;
+use croisiere::application::EventBus;
 
-let (sender, receiver) = crossbeam_channel::unbounded();
-let mut broadcast = Bus::new(1024);
-
+let bus = EventBus::<AppEvent>::default();
 let mut notifier = DepositNotifier {
-    reader: broadcast.add_rx(),
-    bus: EventBus::new(sender.clone()),
+    reader: bus.subscribe(),
+    bus: bus.sender(),
 };
 let mut audit = AuditLog {
-    reader: broadcast.add_rx(),
-    bus: EventBus::new(sender.clone()),
+    reader: bus.subscribe(),
+    bus: bus.sender(),
 };
-
-std::thread::spawn(move || {
-    for event in receiver {
-        broadcast.broadcast(event);
-    }
-});
-
-let bus = EventBus::new(sender);
 ```
 
-A reader only gets the events broadcast after it was added, so add every reader before anything is
-published. The relay stops once every `EventBus` is dropped.
+There is no relay thread. Each reader has an unbounded queue, so services must keep up with the event
+rate to avoid accumulating events in memory. See [Event Bus](./event_bus.md) for delivery and shutdown
+behavior.
 
-The broadcast holds a fixed number of events, `1024` here. When a reader falls that far behind, the
-relay waits for it, while publishers keep sending to the channel.
-
-The last `bus` is then handed to [commands](./commands_and_queries.md#running-them).
+Keep `bus` in the application and hand a sender to each publisher. The bus can also supply a fresh
+sender for each [command](./commands_and_queries.md#running-them).
 
 Whoever runs the application calls `handle` on each service regularly, for example each on its own
 thread:
@@ -203,5 +164,3 @@ std::thread::spawn(move || -> Result<(), AppError> {
 
 [`EventService`]: https://docs.rs/croisiere/latest/croisiere/application/trait.EventService.html
 [`Job`]: https://docs.rs/croisiere/latest/croisiere/application/trait.Job.html
-[`crossbeam-channel`]: https://docs.rs/crossbeam-channel/latest/crossbeam_channel/
-[`bus`]: https://docs.rs/bus/latest/bus/

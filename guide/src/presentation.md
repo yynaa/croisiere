@@ -9,7 +9,7 @@ into something its users understand.
 
 The presentation holds what is needed to run requests, the
 [unit of work factory](./application/units_of_work.md#using-a-unit-of-work) and the
-[event bus](./application/event_services.md#the-event-bus), and calls commands and queries with them:
+[event bus](./application/event_bus.md), and calls commands and queries with them:
 
 ```rust,ignore
 let response = execute(&factory, &bus, Deposit { id, cents })?;
@@ -106,7 +106,7 @@ The factory and the bus are kept in Rocket's managed state:
 ```rust,ignore
 pub struct App {
     pub factory: Factory,
-    pub bus: EventBus,
+    pub bus: EventBus<AppEvent>,
 }
 ```
 
