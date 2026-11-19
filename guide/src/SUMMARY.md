@@ -13,6 +13,8 @@
   - [Event Bus](./application/event_bus.md)
   - [Event Services](./application/event_services.md)
 - [Seaport: Infrastructure](./infrastructure.md)
+  - [DTOs](./infrastructure/dtos.md)
   - [Repositories](./infrastructure/repositories.md)
   - [Units of Work](./infrastructure/units_of_work.md)
+  - [In-memory Storage](./infrastructure/in_memory.md)
 - [Cruise: Presentation](./presentation.md)

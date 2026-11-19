@@ -3,9 +3,8 @@
 //!
 //! Commands and queries receive a [`UnitOfWorkFactory`](croisiere::application::UnitOfWorkFactory)
 //! and reach the repositories through its [`Registry`](registry::Registry).
-//! Implementing the factory and the repositories (a database, an in-memory
-//! store...) is the job of the infrastructure layer, so nothing here runs on
-//! its own.
+//! The infrastructure layer supplies the in-memory factory and repositories;
+//! the binary wires them into a runnable persistence example.
 
 pub mod commands;
 pub mod errors;

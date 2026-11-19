@@ -1,6 +1,6 @@
 use std::convert::Infallible;
 
-use croisiere::application::EventService;
+use croisiere::application::{EventService, Job};
 use crossbeam_channel::Receiver;
 
 use crate::{
@@ -14,7 +14,9 @@ pub struct IncrementNotifier {
     pub bus: Receiver<Envelope>,
 }
 
-impl EventService for IncrementNotifier {
+impl EventService for IncrementNotifier {}
+
+impl Job for IncrementNotifier {
     type Event = Envelope;
     type Error = Infallible;
 

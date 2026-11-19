@@ -7,3 +7,4 @@ extern crate self as croisiere;
 
 pub mod application;
 pub mod domain;
+pub mod infrastructure;

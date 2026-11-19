@@ -4,7 +4,28 @@ The application describes [units of work](../application/units_of_work.md) with 
 and [`UnitOfWorkFactory`] traits. The infrastructure implements them for its storage, together with
 the [repositories](./repositories.md) they hand out.
 
-This page continues the storage kept in memory from the repositories page.
+This page continues the hand-written storage kept in memory from the repositories page. These
+types illustrate a complete commit path; they are separate from the crate's
+[in-memory backend](./in_memory.md), whose snapshot rollback requires callers to serialize writes.
+
+## Using DTO repositories
+
+A unit of work can use [DTO repository adapters](./repositories.md#dto-repository-adapters), but
+the adapters do not manage a transaction. Its write repositories must return handles to the same
+transaction from `DTORepository::connection`, so all DTO writes participate in one commit.
+Connections returned by different write batches must still refer to that transaction.
+
+On commit, call `act()` on the registered changes, then commit the storage transaction only if every
+action succeeds. On any failure, roll it back and return the error. In particular, updates and
+deletes include `version = incoming_version - 1` in the write's `WHERE` clause. If the affected-row
+count is zero, report a version mismatch and roll back the whole transaction, including any writes
+that succeeded before it. The write itself checks the version; a separate read is insufficient.
+
+The registered actions and the unit of work must share the same error type, including the
+`RepositoryDropped` conversion required by actionable snapshots. The DTO adapter error does not
+currently supply that conversion; provide an integration wrapper before wiring it into a registry.
+
+## A hand-written unit of work
 
 ## The unit of work
 
@@ -60,7 +81,10 @@ replaces it only if every write succeeded:
 fn commit_and_rollback(&self) -> Result<(), RepositoryError> {
     let actions = std::mem::take(&mut *self.actions.borrow_mut());
     for mut action in actions {
-        action.act()?;
+        if let Err(error) = action.act() {
+            self.staged.borrow_mut().clear();
+            return Err(error);
+        }
     }
     let staged = std::mem::take(&mut *self.staged.borrow_mut());
 
@@ -80,8 +104,9 @@ The storage stays locked from the first write to the last, so no other unit of w
 between.
 
 With an actual database, `commit_and_rollback` calls `act()` on every change, which writes through the
-database transaction, then commits that transaction. If anything fails, it rolls the transaction back
-instead.
+database transaction, then commits that transaction. If anything fails, including a write that
+modifies zero rows because its version predicate does not match, it rolls the transaction back
+instead. Discard pending writes when an action fails so they cannot be committed by a later retry.
 
 ## The factory
 
