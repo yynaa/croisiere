@@ -17,51 +17,44 @@ implementing them for an actual storage is the
 A unit of work gives access to the repositories its changes go through, with a registry. The registry
 is a type of yours, usually a struct with, for each snapshot type, a way to read and a way to write.
 
-A good pattern is to have the registry hold these:
+Use the library's [`ReadRepositoryFactory`] and [`SharedWriteRepository`] types for these fields.
+The read factory creates owned readers of committed storage. The shared writer stays owned by the
+registry and is borrowed weakly by pending actions. Both types take the snapshot and repository error
+types as parameters:
 
 ```rust,ignore
-use std::{
-    cell::RefCell,
-    rc::{Rc, Weak},
+use std::rc::Rc;
+
+use croisiere::application::{
+    ReadRepositoryBox, ReadRepositoryFactory, SharedWriteRepository, WriteRepositoryWeak,
 };
 
-/// Starts a new read repository. Each one is owned by whoever asked for it, so it can be kept
-/// around, but it does not see the changes of its unit of work that have not been committed yet.
-pub type ReadRepositoryFactory<S> = Box<dyn Fn() -> Box<DynReadRepository<S>>>;
-
-/// A write repository, which actionable snapshots save and delete through while their unit of
-/// work commits.
-pub type SharedWriteRepository<S> = Rc<RefCell<DynWriteRepository<S>>>;
-```
-
-`DynReadRepository` and `DynWriteRepository` are the trait objects from
-[the repositories page](./repositories.md#holding-repositories). The registry then has one of each per
-snapshot type:
-
-```rust,ignore
 pub struct Registry {
-    read_accounts: ReadRepositoryFactory<AccountSnapshot>,
-    write_accounts: SharedWriteRepository<AccountSnapshot>,
+    read_accounts: ReadRepositoryFactory<AccountSnapshot, RepositoryError>,
+    write_accounts: SharedWriteRepository<AccountSnapshot, RepositoryError>,
 }
 
 impl Registry {
     /// Called by the infrastructure when it starts a unit of work.
     pub fn new(
-        read_accounts: ReadRepositoryFactory<AccountSnapshot>,
-        write_accounts: SharedWriteRepository<AccountSnapshot>,
+        read_accounts: ReadRepositoryFactory<AccountSnapshot, RepositoryError>,
+        write_accounts: SharedWriteRepository<AccountSnapshot, RepositoryError>,
     ) -> Self {
         Self { read_accounts, write_accounts }
     }
 
-    pub fn read_accounts(&self) -> Box<DynReadRepository<AccountSnapshot>> {
+    pub fn read_accounts(&self) -> ReadRepositoryBox<AccountSnapshot, RepositoryError> {
         (self.read_accounts)()
     }
 
-    pub fn write_accounts(&self) -> Weak<RefCell<DynWriteRepository<AccountSnapshot>>> {
+    pub fn write_accounts(&self) -> WriteRepositoryWeak<AccountSnapshot, RepositoryError> {
         Rc::downgrade(&self.write_accounts)
     }
 }
 ```
+
+The registry returns [`ReadRepositoryBox`] and [`WriteRepositoryWeak`] directly. These aliases
+wrap the read and write trait objects, with the same snapshot and error types as the fields.
 
 Read repositories are handed out to keep: they only read what is already stored.
 
@@ -74,6 +67,8 @@ Acting through one whose unit of work was dropped fails with [`RepositoryDropped
 As an alternative, read and write access can share one repository object:
 
 ```rust,ignore
+use std::{cell::RefCell, rc::{Rc, Weak}};
+
 pub trait CounterRepository:
     ReadRepository<CounterSnapshot, Error = RepositoryError>
     + WriteRepository<CounterSnapshot, Error = RepositoryError>
@@ -214,4 +209,8 @@ The application then turns it into its own
 [`SnapshotAction`]: https://docs.rs/croisiere/latest/croisiere/application/enum.SnapshotAction.html
 [`VersionedSnapshot`]: https://docs.rs/croisiere/latest/croisiere/application/struct.VersionedSnapshot.html
 [`RepositoryDropped`]: https://docs.rs/croisiere/latest/croisiere/application/struct.RepositoryDropped.html
+[`ReadRepositoryFactory`]: https://docs.rs/croisiere/latest/croisiere/application/type.ReadRepositoryFactory.html
+[`SharedWriteRepository`]: https://docs.rs/croisiere/latest/croisiere/application/type.SharedWriteRepository.html
+[`ReadRepositoryBox`]: https://docs.rs/croisiere/latest/croisiere/application/type.ReadRepositoryBox.html
+[`WriteRepositoryWeak`]: https://docs.rs/croisiere/latest/croisiere/application/type.WriteRepositoryWeak.html
 [`Weak`]: https://doc.rust-lang.org/std/rc/struct.Weak.html

@@ -272,20 +272,38 @@ returns one.
 ## Holding repositories
 
 The application holds repositories as trait objects, so it does not depend on their implementation.
-Naming the two trait objects, with the repository error filled in, keeps their uses short:
+The library provides two aliases that a registry can return directly:
 
 ```rust,ignore
-/// The read repositories handed out by a unit of work.
-pub type DynReadRepository<S> = dyn ReadRepository<S, Error = RepositoryError>;
+use croisiere::application::{ReadRepositoryBox, WriteRepositoryWeak};
 
-/// The write repositories handed out by a unit of work.
-pub type DynWriteRepository<S> = dyn WriteRepository<S, Error = RepositoryError>;
+impl Registry {
+    pub fn read_accounts(&self) -> ReadRepositoryBox<AccountSnapshot, RepositoryError> {
+        (self.read_accounts)()
+    }
+
+    pub fn write_accounts(&self) -> WriteRepositoryWeak<AccountSnapshot, RepositoryError> {
+        std::rc::Rc::downgrade(&self.write_accounts)
+    }
+}
 ```
 
-The application gets them from the registry of a
-[unit of work](./units_of_work.md#the-registry).
+[`ReadRepositoryBox<S, E>`][`ReadRepositoryBox`] is an owned `Box<dyn ReadRepository<S, Error = E>>`.
+The caller owns the reader and can keep it after the unit of work is dropped, provided the backing
+storage remains available. Readers created by the registry's `ReadRepositoryFactory` observe
+committed storage, without seeing pending actions.
+
+[`WriteRepositoryWeak<S, E>`][`WriteRepositoryWeak`] is a
+`Weak<RefCell<dyn WriteRepository<S, Error = E>>>`. It borrows the registry's writer without
+keeping it alive. Pass it directly to `make_actionable` or `do_and_make_actionable`; acting after
+the writer is dropped returns [`RepositoryDropped`], converted into `E`.
+
+The [unit of work's registry](./units_of_work.md#the-registry) holds the corresponding
+`ReadRepositoryFactory` and `SharedWriteRepository` fields.
 
 [`ReadRepository`]: https://docs.rs/croisiere/latest/croisiere/application/trait.ReadRepository.html
 [`WriteRepository`]: https://docs.rs/croisiere/latest/croisiere/application/trait.WriteRepository.html
 [`VersionedSnapshot`]: https://docs.rs/croisiere/latest/croisiere/application/struct.VersionedSnapshot.html
 [`RepositoryDropped`]: https://docs.rs/croisiere/latest/croisiere/application/struct.RepositoryDropped.html
+[`ReadRepositoryBox`]: https://docs.rs/croisiere/latest/croisiere/application/type.ReadRepositoryBox.html
+[`WriteRepositoryWeak`]: https://docs.rs/croisiere/latest/croisiere/application/type.WriteRepositoryWeak.html

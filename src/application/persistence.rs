@@ -44,6 +44,29 @@ pub trait WriteRepository<S: Snapshot> {
     fn delete(&mut self, snapshots: Vec<&VersionedSnapshot<S>>) -> Result<(), Self::Error>;
 }
 
+/// Owned read repository for snapshots of type `S`, returning errors of type `E`.
+///
+/// Returned by a registry through its [`ReadRepositoryFactory`]. The caller owns
+/// the reader, so it can outlive the unit of work. The backing storage must
+/// still be available for reads to succeed.
+pub type ReadRepositoryBox<S, E> = Box<dyn ReadRepository<S, Error = E>>;
+
+/// Weak reference to a write repository for snapshots of type `S`, returning
+/// errors of type `E`.
+///
+/// A registry returns this by downgrading its [`SharedWriteRepository`], so
+/// pending actions cannot keep the writer alive beyond the unit of work.
+/// Pass it directly to [`VersionedSnapshot::make_actionable`] or
+/// [`VersionedSnapshot::do_and_make_actionable`]. Acting after the writer is
+/// dropped fails with [`RepositoryDropped`], which `E` must convert from.
+pub type WriteRepositoryWeak<S, E> = rc::Weak<RefCell<dyn WriteRepository<S, Error = E>>>;
+
+/// Creates an owned reader of committed storage, independent of the registry.
+pub type ReadRepositoryFactory<S, E> = Box<dyn Fn() -> ReadRepositoryBox<S, E>>;
+
+/// Writer owned by the registry and borrowed weakly by pending actions.
+pub type SharedWriteRepository<S, E> = rc::Rc<RefCell<dyn WriteRepository<S, Error = E>>>;
+
 /// A snapshot together with its version, as stored by repositories.
 #[derive(Clone)]
 pub struct VersionedSnapshot<S>
