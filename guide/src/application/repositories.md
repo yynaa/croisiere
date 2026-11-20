@@ -64,7 +64,6 @@ pub trait ReadRepository<S: Snapshot> {
     fn count(
         &mut self,
         filters: HashSet<S::Filter>,
-        sorter: Option<S::Sorter>,
     ) -> Result<usize, Self::Error>;
 }
 ```
@@ -74,6 +73,9 @@ pub trait ReadRepository<S: Snapshot> {
 - `sorter` is the snapshot's [sorter](./snapshots.md#sorters). Without one, snapshots come in the
   storage's own order.
 - `pagination` restricts the result to a page. Without one, every matching snapshot is returned.
+
+`count` takes only filters: ordering does not affect how many snapshots match, and the total
+ignores pagination.
 
 ```rust,ignore
 use croisiere::application::Pagination;
@@ -111,23 +113,86 @@ failure of the storage.
 You will usually not call `save` and `delete` yourself: the application registers what to save and
 delete on a unit of work, which calls them together when it commits.
 
+## Extensions
+
+> [!TIP]
+> **Define application-owned extension traits for common repository operations.** Helpers such as
+> `get_unique` and `exists` can build on `ReadRepository` and return your own error type. Give the
+> trait a blanket implementation so every compatible repository gets those helpers automatically,
+> without requiring infrastructure implementations to repeat them.
+> Prefer adding variants to your existing `RepositoryError` for extension failures instead of
+> introducing a separate error type.
+
+For example, the application can distinguish a storage failure from an unexpected number of matches:
+
+```rust,ignore
+use std::collections::HashSet;
+
+use croisiere::application::{Pagination, ReadRepository, Snapshot, VersionedSnapshot};
+
+pub trait ReadRepositoryExt<S: Snapshot>:
+    ReadRepository<S, Error = RepositoryError>
+{
+    fn get_unique(
+        &mut self,
+        filters: HashSet<S::Filter>,
+    ) -> Result<VersionedSnapshot<S>, RepositoryError> {
+        // Two matches are enough to reject a nonunique result.
+        let mut matches = self.get(
+            filters,
+            None,
+            Some(Pagination { limit: 2, offset: 0 }),
+        )?;
+        if matches.len() > 1 {
+            return Err(RepositoryError::NotUnique);
+        }
+        matches.pop().ok_or(RepositoryError::NotFound)
+    }
+
+    fn exists(&mut self, filters: HashSet<S::Filter>) -> Result<bool, RepositoryError> {
+        self.count(filters).map(|count| count > 0)
+    }
+}
+
+impl<S, R> ReadRepositoryExt<S> for R
+where
+    S: Snapshot,
+    R: ReadRepository<S, Error = RepositoryError> + ?Sized,
+{}
+```
+
+Import `ReadRepositoryExt` wherever you want to call these methods. The blanket implementation
+covers every repository with the matching snapshot and error types, including trait objects through
+`?Sized`. Use the same pattern for helpers built on `WriteRepository`.
+
+Add `NotFound` and `NotUnique` to the application's `RepositoryError`, as shown below. Callers can
+distinguish lookup expectations such as “exactly one match” from storage failures through variants
+of that same error type. In particular, `exists` must propagate read errors rather than treat them
+as `false`. These helpers describe the result of a read; they do not guarantee uniqueness or prevent
+another request from changing the data before a later write.
+
 ## Errors
 
 ### The repository error
 
 A unit of work commits the actions of every repository it holds, and reports their errors as one
-type. All your repositories therefore share a single error type, covering everything that can go
-wrong with persistence, and nothing else. It must convert from [`RepositoryDropped`]:
+type. All your repositories therefore share a single error type, covering persistence failures and
+repository extension failures. Domain failures belong in `DomainError`. The repository error must
+convert from [`RepositoryDropped`]:
 
 ```rust,ignore
 use croisiere::application::RepositoryDropped;
 
 #[derive(Debug)]
 pub enum RepositoryError {
+    /// A lookup requiring one match found none.
+    NotFound,
+    /// A lookup requiring one match found several.
+    NotUnique,
     /// The snapshot was changed by someone else since it was read.
     Conflict,
-    /// The storage itself failed.
-    Storage(String),
+    /// A failure specific to the persistence implementation.
+    ImplementationError(anyhow::Error),
     RepositoryDropped,
 }
 
@@ -137,6 +202,29 @@ impl From<RepositoryDropped> for RepositoryError {
     }
 }
 ```
+
+The application defines this error without importing a database client or backend error.
+Infrastructure keeps its own typed errors and converts them at the boundary:
+
+```rust,ignore
+// In infrastructure, where both types are available:
+impl From<InMemoryRepositoryError> for RepositoryError {
+    fn from(error: InMemoryRepositoryError) -> Self {
+        Self::ImplementationError(anyhow::Error::new(error))
+    }
+}
+```
+
+`anyhow::Error::new` retains the original error. Formatting it to a string first would discard
+its concrete type and error chain. Infrastructure can inspect the wrapped cause with
+`downcast_ref::<InMemoryRepositoryError>()`; application code can report the error without
+knowing which backend produced it. Typed backend errors remain useful for matching and diagnosis
+inside infrastructure.
+
+`Conflict` is an optional application-level category when callers need to distinguish concurrent
+writes. The counter example instead wraps its backend's conflict failure in `ImplementationError`.
+DTO conversion failures also convert directly into `RepositoryError` with `From<SpecificError>`;
+an infallible conversion uses `From<Infallible>`.
 
 ### The application error
 

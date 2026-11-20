@@ -1,49 +1,44 @@
 # Infrastructure: In-memory Storage
 
-The `croisiere::infrastructure::persistence::in_memory` module contains an in-memory backend. It is available with the `in-memory` feature, which is enabled by default. Building with
-`--no-default-features` disables the module while retaining the DTO repository adapters.
+`croisiere::infrastructure::persistence::in_memory` provides tables, units of work and a factory for
+storage in memory. It is available with the default `in-memory` feature. Building with
+`--no-default-features` disables this module and keeps the general DTO repository traits available.
 
-The module exports `InMemoryDatabase`, `InMemoryRepositoryError`, `InMemoryDTO`,
-`InMemoryUnitOfWork` and `InMemoryUnitOfWorkFactory`. Create an empty database with `InMemoryDatabase::default()` and a factory with
-`InMemoryUnitOfWorkFactory::new(registry, database)`. Units of work support snapshot rollback on returned action errors, provided
-callers serialize writes during commit.
-The hand-written backend in the [repositories](./repositories.md) and
-[units of work](./units_of_work.md) chapters is an implementation example, separate from these types.
+For a complete integration, follow the [counter example](../examples/counter_example.md). It uses the library
+factory and unit of work directly, with application-specific DTOs and repositories.
 
 ## Database tables
 
-`InMemoryDatabase` holds a map from table names to vectors of rows. Each row is stored as
-a cloneable, type-erased value, so its concrete type is recovered by downcasting during reads, updates
-and deletes. Use one concrete row type per table: insertion permits mixed types, but subsequent
-operations fail if any row cannot be downcast to the requested type.
+Create an empty database with `InMemoryDatabase::default()`. Share it through an
+`Arc<Mutex<InMemoryDatabase>>` when repositories and units of work need the same storage.
+
+Each named table holds owned rows in insertion order. Rows are cloneable, type-erased values;
+operations recover their concrete type by downcasting. Use one concrete row type per table.
+The counter example uses one table for its DTO, with its UUID stored in each row.
 
 | Method | Behavior |
 |--------|----------|
-| `insert(table, row)` | Creates the table if necessary and appends a row. Requires `Any + Clone + Send + Sync`; performs no uniqueness or version checks. |
-| `read_rows::<O>(table)` | Clones all rows in insertion order. Requires `O: Clone + 'static`. |
-| `delete::<O>(table, predicate)` | Removes matching rows, preserves the order of remaining rows, and returns the number removed. |
-| `update::<O>(table, predicate, update)` | Applies the callback to matching rows and returns the number matched. |
+| `insert(table, row)` | Appends a row, creating the table if needed. Requires `Any + Clone + Send + Sync`. |
+| `read_rows::<O>(table)` | Clones rows in insertion order. Requires `O: Clone + 'static`. |
+| `update::<O>(table, predicate, update)` | Updates matching rows and returns how many matched. |
+| `delete::<O>(table, predicate)` | Removes matching rows, preserving the remaining order, and returns how many were removed. |
 
-Read, delete and update return `TableNotFound(name)` for an unknown table. They return
-`DowncastFromAnyImpossible` if any row has the wrong concrete type. Reading an existing empty table
-returns an empty vector; deleting or updating it returns zero. Deleting every row leaves the table
-in place.
+Read, update and delete return `TableNotFound(name)` if the table has never been created. After
+its last row is deleted, the table remains present and empty. The counter selector treats a missing
+`counters` table as an empty result so queries also work before the first insertion.
 
-Deletion evaluates all downcasts and predicates before removing rows. Updating downcasts all rows
-before running any predicate or mutation callback. A downcast error therefore leaves the table
-unchanged. This is not transaction support: callback panics are not rolled back, and separate
-database operations do not commit atomically.
+Insertion does not check uniqueness or row types. If incompatible types are mixed in one table,
+subsequent operations can return `DowncastFromAnyImpossible`. Update and delete check row types
+before modifying rows, so a downcast failure leaves the table unchanged.
 
-The database itself has no locks. Sharing and locking belong to its owner, typically an
-`Arc<Mutex<InMemoryDatabase>>`. Use `InMemoryDatabase::default()` to create the initial empty database.
+The database methods do not allocate identifiers, interpret filters, enforce versions or provide
+locking. Those responsibilities belong to DTO operations and their owner. Cloning the database
+clones its tables and rows. Rollback follows each row's `Clone` semantics: shared mutable state
+inside a row remains shared if its clone shares it.
 
-Cloning the database clones every table and row. Rollback follows each row's `Clone` semantics:
-shared mutable state inside a row remains shared if cloning that row shares it.
+## DTO metadata and connections
 
-## In-memory DTOs
-
-`InMemoryDTO` requires `Debug + Clone` and a `NAME`. Implementing it supplies a blanket `DTO`
-implementation:
+For operations that use the default backend connection and error, implement `InMemoryDTO`:
 
 ```rust,ignore
 use croisiere::infrastructure::persistence::in_memory::InMemoryDTO;
@@ -60,44 +55,95 @@ impl InMemoryDTO for AccountRow {
 }
 ```
 
-The resulting `DTO` has the same name, `ConnectionData = Weak<Mutex<InMemoryDatabase>>`, and
-`Error = InMemoryRepositoryError`. Implementors must not also implement `DTO` directly, because
-that would conflict with the blanket implementation.
+This supplies a blanket `DTO` implementation with:
 
-The weak handle does not keep the database alive. DTO operations must upgrade it and lock the mutex
-before accessing rows. In addition to table and downcast errors, the error enum provides
-`DatabaseDropped` and `DatabasePoisoned`. DTO operations can report version conflicts using `ActionFailed(String)`.
+- `ConnectionData = Weak<Mutex<InMemoryDatabase>>`;
+- `Error = InMemoryRepositoryError`;
+- `NAME` forwarded from the marker.
 
-`InMemoryDTO` supplies metadata only. It does not implement `DTOSelect`, `DTOInsert`, `DTOUpdate`
-or `DTODelete`, nor does it provide snapshot conversions. Those remain backend-specific work.
-Filtering, ordering, pagination and version checks are not built into the database table methods.
+It does not implement select, insert, update, delete or snapshot conversions. Implement those for
+your DTO. Do not also implement `DTO` directly on a type implementing `InMemoryDTO`, because the
+implementations would overlap.
 
-## Units of work and their factory
+If you need an application repository error or a connection that also carries the commit gate,
+implement `DTO` directly instead of the marker. The library's `InMemoryConnection` holds the weak
+database handle and shared commit gate. The counter example uses:
 
-`InMemoryUnitOfWork::new(registry, writer)` takes a registry and a weak database handle. It starts
-with an empty `VecDeque` of actionable snapshots:
+```rust,ignore
+use croisiere::infrastructure::persistence::in_memory::InMemoryConnection;
+
+impl DTO for CounterDTO {
+    const NAME: &'static str = "counters";
+    type ConnectionData = InMemoryConnection;
+    type Error = RepositoryError;
+}
+```
+
+Construct `InMemoryConnection { database, gate }` from the handles supplied to the factory's
+registry builder. Cloning it shares both handles without keeping the database alive.
+Use `connection.with_database(|database| ...)` to upgrade and lock the database for an operation.
+The callback returns `Result<T, E>`, where `E: From<InMemoryRepositoryError>`, so it can use your
+application's repository error. Access failures convert into that error type; callback errors
+propagate unchanged. The helper only acquires the database mutex and does not roll back changes
+itself. Select operations also acquire the commit gate first. Write operations run
+inside a unit-of-work commit, which already holds that gate, so they must not acquire it again.
+
+## Typed backend errors
+
+`InMemoryRepositoryError` describes backend failures:
+
+| Variant | Meaning |
+|---------|---------|
+| `DatabaseDropped` | The weak database handle could not be upgraded. |
+| `DatabasePoisoned` | A required mutex was poisoned. |
+| `TableNotFound(String)` | The named table has not been created. |
+| `DowncastFromAnyImpossible` | A stored row has an unexpected concrete type. |
+| `ActionFailed(String)` | An operation reported a failure; the counter DTO uses this for version conflicts. |
+
+Keep these concrete errors in infrastructure. To expose the application's database-agnostic error,
+implement `From<InMemoryRepositoryError>` there and wrap the original error in
+`RepositoryError::ImplementationError(anyhow::Error)`. This retains its type and error chain.
+Do not turn it into a string before wrapping it.
+
+## Units of work
+
+`InMemoryUnitOfWork<R, E>` holds a registry and pending actions returning the shared error `E`.
+The error must implement `From<InMemoryRepositoryError>` and defaults to that backend error type.
+For actionable snapshots, choose an error that also converts from `RepositoryDropped`.
+
+`InMemoryUnitOfWork::new(registry, writer)` receives a registry and weak database handle.
+`with_commit_gate(gate)` configures a shared lock across commit and rollback.
 
 - `registry()` returns the supplied registry.
-- `register_action()` appends an action without executing it.
-- `commit_and_rollback()` clones the database and executes actions in registration order. It stops
-  at the first returned error, restores the clone and returns that error. The entire batch is
-  consumed on success or failure, including actions that were not executed.
+- `register_action()` queues a change without writing it.
+- `commit_and_rollback()` consumes the batch, saves a database clone, and runs actions in order.
+  On the first returned error it restores that clone and returns the original error.
 
-No database lock is held while actions run, since DTO operations acquire the lock themselves.
-Callers must prevent concurrent writes for the duration of commit; otherwise rollback could
-overwrite another writer's changes. Action panics propagate without rollback. A dropped database
-or an initially poisoned mutex returns the corresponding error before executing any action.
+The batch is consumed on success or failure, including actions not executed after an error.
+Dropping an uncommitted unit of work discards pending changes. Action panics do not trigger
+rollback. See [transaction boundaries](./units_of_work.md#commit-and-rollback) for the full behavior.
 
-Actions must have `Error = InMemoryRepositoryError`. The error type also does not yet implement
-`From<RepositoryDropped>`, which standard `ActionableSnapshot` values require for execution.
+## Factory and registry construction
 
-`InMemoryUnitOfWorkFactory<R>` owns an `Arc<Mutex<InMemoryDatabase>>` and a registry template.
-Its `UnitOfWorkFactory` implementation requires `R: Clone + Send + Sync + 'static`. `begin()`
-clones the registry, downgrades the database pointer and creates a unit of work with an empty queue.
-It does not construct repositories or start a transaction. How much repository state is shared
-depends on the registry's `Clone` implementation.
+`InMemoryUnitOfWorkFactory<R, E>` owns the database and a commit gate. It returns the library's
+`InMemoryUnitOfWork<R, E>` directly, so the example needs no factory or unit-of-work implementation.
+The factory requires `R: 'static` and `E: From<InMemoryRepositoryError> + 'static` to implement
+`UnitOfWorkFactory`.
 
-Construct it with `InMemoryUnitOfWorkFactory::new(registry, database)`. Applications whose registry
-contains `Rc` repositories can instead construct fresh repositories in their own factory and use
-`InMemoryUnitOfWork::new` directly. See `crates/croisiere-example` for a runnable integration that
-adapts application errors and serializes commits and reads.
+There are two construction paths:
+
+| Constructor | Registry behavior |
+|-------------|-------------------|
+| `new(registry, database)` | Clones a template on each `begin()`. Requires `R: Clone + Send + Sync + 'static` and uses the default backend error. |
+| `from_registry_factory(database, builder)` | Calls a builder for each `begin()`. Supports a chosen error `E` and registries that need not be `Clone`, `Send` or `Sync`. |
+
+The builder receives `Weak<Mutex<InMemoryDatabase>>` and `Arc<Mutex<()>>`, then returns `R`.
+It must implement `Fn + Send + Sync + 'static`. It can create `Rc<RefCell<_>>` repositories on the
+calling thread because those repositories are returned to the unit of work, not stored in the
+shared factory. Avoid retaining them across calls when they should expire with their unit of work.
+The registry is an application struct; no registry-construction trait is required.
+
+All units of work from a factory use its shared gate for the whole commit and rollback. Give
+repository reads the same gate to prevent partial reads. Every writer to the same database must
+respect it; two independently constructed factories have different gates. The database mutex alone
+only protects individual operations. See [why the commit gate is separate](./units_of_work.md#database-locks-and-the-commit-gate).

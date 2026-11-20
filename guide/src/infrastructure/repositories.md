@@ -4,9 +4,10 @@ The application describes [repositories](../application/repositories.md) with th
 and [`WriteRepository`] traits. The infrastructure implements them for an actual storage: a database,
 files, memory, another service.
 
-The framework provides DTO adapters for implementing those traits, described first below. The rest
-of the page shows a hand-written implementation with storage kept in memory. Its types are examples,
-separate from the crate's [in-memory backend](./in_memory.md).
+Implement `DTORepository`, `DTOReadRepository<S>` and `DTOWriteRepository<S>` on one repository.
+Blanket implementations supply `ReadRepository<S>` and `WriteRepository<S>`. The runnable
+[counter example](../examples/counter_example.md) follows this path. The hand-written alternative later in
+this chapter explains what a backend must do when using the application traits directly.
 
 ## DTO repository adapters
 
@@ -18,10 +19,10 @@ impl DTORepository for AccountRepository {
     const NAME: &'static str = "accounts";
 
     type ConnectionData = AccountConnection;
-    type Error = StorageError;
+    type Error = RepositoryError;
 
-    fn connection(&mut self) -> Result<AccountConnection, StorageError> {
-        self.storage.connection()
+    fn connection(&mut self) -> Result<AccountConnection, RepositoryError> {
+        Ok(self.storage.connection()?)
     }
 }
 ```
@@ -29,6 +30,11 @@ impl DTORepository for AccountRepository {
 `AccountRepository`, its `storage` field and the connection acquisition above are backend-specific.
 The DTO and repository must have the same connection and storage-error types. The adapter does not
 use `NAME` to select storage or match it against the DTO's name.
+
+When a snapshot spans several tables, the associated `DTO` can be an intermediate structure grouping
+table DTOs, or a DTO containing other DTOs. Its operations must assemble and persist the complete
+representation. See [one snapshot across multiple tables](./dtos.md#one-snapshot-across-multiple-tables)
+for the design choices and transaction requirements.
 
 ### Reading through a DTO
 
@@ -41,14 +47,12 @@ impl DTOReadRepository<AccountSnapshot> for AccountRepository {
     fn count(
         &mut self,
         filters: HashSet<AccountFilter>,
-        sorter: Option<AccountSorter>,
-    ) -> Result<usize, StorageError> {
+    ) -> Result<usize, RepositoryError> {
         let mut conn = self.connection()?;
         // Backend-specific count operation using storage-level criteria.
-        conn.count_accounts(
+        Ok(conn.count_accounts(
             filters.into_iter().map(Into::into).collect(),
-            sorter.map(Into::into),
-        )
+        )?)
     }
 }
 ```
@@ -58,6 +62,7 @@ The blanket `ReadRepository<S>` implementation is available when:
 - The DTO implements `DTOSelect`, with the repository's connection and error types.
 - `VersionedSnapshot<S>` implements `TryFrom` for the DTO.
 - The DTO's filter and sorter implement `From<S::Filter>` and `From<S::Sorter>`.
+- The shared `Error` implements `From` for the DTO-to-snapshot conversion error.
 
 For `get`, the adapter acquires one connection, converts filters and sorter, and calls `DTOSelect::select`
 with pagination unchanged. It converts the selected DTOs into versioned snapshots, preserving their
@@ -66,7 +71,7 @@ error instead of partial results.
 
 For `count`, the adapter delegates directly to your `DTOReadRepository::count` implementation. It
 does not acquire a connection or convert criteria for you. The method receives the application's
-filters and sorter and must supply its own storage query; it receives no pagination.
+filters and must supply its own storage query; it receives no sorter or pagination.
 
 The same repository and DTO can support several snapshot types through separate
 `DTOReadRepository<S>` implementations and conversions. Use `ReadRepository::<S>::get` or
@@ -80,22 +85,22 @@ Implement `DTOWriteRepository<S>` with a DTO and an existence check:
 impl DTOWriteRepository<AccountSnapshot> for AccountRepository {
     type DTO = AccountDTO;
 
-    fn exists(&mut self, dto: &AccountDTO) -> bool {
+    fn exists(&mut self, dto: &AccountDTO) -> Result<bool, RepositoryError> {
         // Consult backend-specific state to choose insert or update.
-        self.known_account_ids.contains(&dto.id)
+        Ok(self.known_account_ids.contains(&dto.id))
     }
 }
 ```
 
 The example assumes the repository already knows which account identifiers exist. `exists` returns
-a `bool`, cannot report an error, and is not passed the batch's connection. Your implementation must
+a `Result<bool, Self::Error>` and is not passed the batch's connection. Your implementation must
 provide its own way to determine existence. This check chooses an operation; version validation still
-belongs in the write itself.
+belongs in the write itself. If the existence check fails, the save batch stops and returns that
+error without inserting or updating the DTO.
 
 The blanket `WriteRepository<S>` implementation requires `DTOInsert`, `DTOUpdate` and `DTODelete`
-for the DTO, matching connection and error types, `From<VersionedSnapshot<S>>` for the DTO, and
-`TryFrom<DTO>` for `VersionedSnapshot<S>`. The last bound supplies the adapter's conversion-error
-type; writes do not perform that conversion back to snapshots.
+for the DTO, matching connection and error types, and `From<VersionedSnapshot<S>>` for the DTO.
+Writes do not require `TryFrom<DTO>` for `VersionedSnapshot<S>`.
 
 For each `save` or `delete` call, the adapter acquires one connection, including for an empty batch.
 It clones each supplied snapshot and converts the clone into a DTO. `save` calls `exists` for each
@@ -107,29 +112,27 @@ the unit of work's transaction so a failed write can roll back every change in t
 
 ### Adapter errors
 
-Both adapters use `DTORepositoryError<R, C>`, where `R` is the storage error and `C` is the error
-from converting a DTO into a versioned snapshot:
+DTO operations, connection acquisition and the blanket application repositories use the same
+`Error` type. Storage errors propagate unchanged. Only reads need
+`Error: From<<VersionedSnapshot<S> as TryFrom<DTO>>::Error>` to convert DTO-to-snapshot failures.
+Writes have no conversion-error bound.
 
-| Variant | Cause |
-|---------|-------|
-| `Repository(R)` | Connection acquisition, select, count, insert, update or delete failed. |
-| `Conversion(C)` | A selected DTO could not become a versioned snapshot. |
+Choose one error type, such as `RepositoryError`, and implement `From<SpecificError>` for the failures
+it can receive: a backend error, a DTO conversion error, or `RepositoryDropped` when using
+actionable snapshots. An infallible DTO conversion uses `From<Infallible>`. There is no separate
+application error associated type or repository error wrapper. A separate type wrapping the DTO
+repository just to implement `ReadRepository` and `WriteRepository` is unnecessary.
 
-Write calls only return the `Repository` variant. Its current display message says
-`repository read failed` even for write failures; match the variant to distinguish storage failures
-from conversion failures.
-
-When using the adapters with actionable snapshots, the final write-repository error must also
-convert from `RepositoryDropped`, as required by the
-[application's persistence API](../application/units_of_work.md#errors). `DTORepositoryError` does
-not currently provide that conversion; integration needs an error wrapper or another adapter that
-does. DTO adapters alone are therefore not a complete unit-of-work implementation.
+Keep backend error types in infrastructure. At the application boundary, wrap them in
+`RepositoryError::ImplementationError(anyhow::Error)` rather than converting them to strings.
+This keeps application code database-agnostic while preserving the source error for diagnostics
+and downcasting. See [repository errors](../application/repositories.md#the-repository-error).
 
 ## A hand-written repository
 
 The following example implements the application traits directly, without DTO adapters.
 
-## The storage
+### The storage
 
 The storage holds the committed snapshots, with their versions. It is shared by every unit of work,
 possibly across threads, hence the [`Arc`] and the [`Mutex`]:
@@ -152,7 +155,7 @@ pub type SharedDatabase = Arc<Mutex<Database>>;
 
 With an actual database, this is the connection pool, or whatever your database client provides.
 
-## Reading
+### Reading
 
 A read repository reads what is committed. It applies the snapshot's
 [filters and sorter](../application/snapshots.md#filters-and-sorters): what each of them means is
@@ -183,7 +186,7 @@ impl ReadRepository<AccountSnapshot> for AccountReader {
         sorter: Option<AccountSorter>,
         pagination: Option<Pagination>,
     ) -> Result<Vec<VersionedSnapshot<AccountSnapshot>>, RepositoryError> {
-        let database = self.database.lock().map_err(|_| RepositoryError::Storage("poisoned".into()))?;
+        let database = self.database.lock().map_err(|_| RepositoryError::ImplementationError(anyhow::anyhow!("database mutex poisoned")))?;
 
         // A snapshot must match every filter.
         let mut found: Vec<_> = database
@@ -211,9 +214,8 @@ impl ReadRepository<AccountSnapshot> for AccountReader {
     fn count(
         &mut self,
         filters: HashSet<AccountFilter>,
-        sorter: Option<AccountSorter>,
     ) -> Result<usize, RepositoryError> {
-        Ok(self.get(filters, sorter, None)?.len())
+        Ok(self.get(filters, None, None)?.len())
     }
 }
 ```
@@ -221,7 +223,7 @@ impl ReadRepository<AccountSnapshot> for AccountReader {
 With an actual database, filters, sorters and pagination usually become parts of the query sent to it,
 rather than being applied in memory.
 
-## Writing
+### Writing
 
 A write repository does not write to the storage right away. Its writes belong to its unit of work,
 and must only be stored if the whole unit of work commits. So it stages them, and the
@@ -274,7 +276,7 @@ impl Database {
     pub fn apply(&mut self, write: StagedWrite) -> Result<(), RepositoryError> {
         match write {
             StagedWrite::Save(vs) => {
-                // A new account is stored at version 0, and saved at version 1.
+                // An unsaved snapshot starts at version 0; its first save uses version 1.
                 let stored = self.accounts.get(&vs.snapshot.id).map_or(0, |s| s.version);
                 if stored + 1 != vs.version {
                     return Err(RepositoryError::Conflict);

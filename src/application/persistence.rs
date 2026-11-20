@@ -25,11 +25,7 @@ pub trait ReadRepository<S: Snapshot> {
         pagination: Option<Pagination>,
     ) -> Result<Vec<VersionedSnapshot<S>>, Self::Error>;
     /// Returns how many snapshots match `filters`.
-    fn count(
-        &mut self,
-        filters: HashSet<S::Filter>,
-        sorter: Option<S::Sorter>,
-    ) -> Result<usize, Self::Error>;
+    fn count(&mut self, filters: HashSet<S::Filter>) -> Result<usize, Self::Error>;
 }
 
 /// Write side of the storage of snapshots of type `S`.

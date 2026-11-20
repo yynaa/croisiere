@@ -18,6 +18,7 @@
 
 mod dto;
 #[cfg(feature = "in-memory")]
+#[cfg_attr(docsrs, doc(cfg(feature = "in-memory")))]
 pub mod in_memory;
 mod repository;
 
@@ -29,5 +30,4 @@ pub use dto::DTOUpdate;
 pub use dto::InternalId;
 pub use repository::DTOReadRepository;
 pub use repository::DTORepository;
-pub use repository::DTORepositoryError;
 pub use repository::DTOWriteRepository;

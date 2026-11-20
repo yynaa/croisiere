@@ -338,12 +338,8 @@ impl ReadRepository<AccountSnapshot> for AccountRepository {
         })
     }
 
-    fn count(
-        &mut self,
-        filters: HashSet<AccountFilter>,
-        sorter: Option<AccountSorter>,
-    ) -> Result<usize, AppError> {
-        Ok(self.get(filters, sorter, None)?.len())
+    fn count(&mut self, filters: HashSet<AccountFilter>) -> Result<usize, AppError> {
+        Ok(self.get(filters, None, None)?.len())
     }
 }
 
@@ -500,7 +496,7 @@ impl Command for OpenAccount {
         let repository = &uow.registry().accounts;
         let existing = repository
             .borrow_mut()
-            .count(HashSet::from([AccountFilter::ById(self.id)]), None)?;
+            .count(HashSet::from([AccountFilter::ById(self.id)]))?;
         if existing > 0 {
             return Err(AppError::AlreadyExists(self.id));
         }
@@ -674,7 +670,7 @@ impl Query for ListAccounts {
         let mut repository = uow.registry().accounts.borrow_mut();
         let filters: HashSet<_> = self.filters.iter().cloned().collect();
 
-        let total = repository.count(filters.clone(), self.sorter)?;
+        let total = repository.count(filters.clone())?;
         let pagination = self
             .page
             .map(|(limit, offset)| Pagination { limit, offset });

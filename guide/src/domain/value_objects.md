@@ -30,13 +30,13 @@ pub enum Currency {
 The derive only implements [`ValueObject`] itself. The supertraits have to be derived (or
 implemented) by you:
 
-| Trait                 | Why                                                                 |
-|-----------------------|---------------------------------------------------------------------|
-| `PartialEq`, `Eq`     | Value objects are compared by their values, not by an identity.     |
-| `Hash`                | Equal values hash the same, so value objects can be used as keys.   |
-| `Clone`               | A value can be freely copied around without changing its meaning.  |
-| `Default`             | Aggregates and their builders start from a default state.          |
-| `Debug`               | Every domain type can be inspected.                                 |
+| Trait             | Why                                                               |
+| ----------------- | ----------------------------------------------------------------- |
+| `PartialEq`, `Eq` | Value objects are compared by their values, not by an identity.   |
+| `Hash`            | Equal values hash the same, so value objects can be used as keys. |
+| `Clone`           | A value can be freely copied around without changing its meaning. |
+| `Default`         | Aggregates and their builders start from a default state.         |
+| `Debug`           | Every domain type can be inspected.                               |
 
 Forgetting one of them is a compile error.
 
@@ -75,7 +75,25 @@ entity inside it would bring an identity with it.
 
 ## Building value objects
 
-It is recommended to give value objects with more than a couple of fields a builder. You can write one
-by hand or use a crate like [`builder_pattern`](https://docs.rs/builder-pattern/latest/builder_pattern/).
+> [!TIP]
+> It is recommended to give value objects with more than a couple of fields a builder. You can write one
+> by hand or use a crate like [`builder_pattern`](https://docs.rs/builder-pattern/latest/builder_pattern/).
+
+> [!TIP]
+> **Validate values when constructing the value object.** Put rules that depend only on its
+> values in the value object itself. For example, a name that must not be empty should reject
+> an empty string in its `TryFrom<String>` implementation, rather than relying on an aggregate
+> to check it. Use `TryFrom` instead of `From` when conversion can fail, and keep fields private
+> so callers cannot bypass validation or mutate a valid value into an invalid one. Apply the
+> same validation when restoring values from snapshots. Since `ValueObject` requires `Default`,
+> ensure that the default also satisfies its invariants.
+
+> [!TIP]
+> **Consider private fields with read-only getters.** You do not have to make every field `pub`.
+> Getters let callers inspect a value while keeping its representation and mutation under your
+> control. Writing them by hand can be repetitive; libraries such as `getset` can reduce that work.
+> Review generated getters, though: a getter that borrows a field may expose its exact storage type
+> instead of the most useful view. For a `String` field, a handwritten getter returning `&str`
+> usually offers a more flexible interface than `&String`, without cloning or allocating.
 
 [`ValueObject`]: https://docs.rs/croisiere/latest/croisiere/domain/trait.ValueObject.html

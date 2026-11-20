@@ -3,10 +3,23 @@ use std::collections::HashSet;
 use croisiere::{
     application::{Filter, Pagination, ReadRepository, Snapshot, Sorter, VersionedSnapshot},
     domain::Aggregate,
-    infrastructure::persistence::{
-        DTO, DTOReadRepository, DTORepository, DTORepositoryError, DTOSelect,
-    },
+    infrastructure::persistence::{DTO, DTOReadRepository, DTORepository, DTOSelect},
 };
+
+#[derive(Debug, PartialEq, Eq)]
+enum TestError {
+    Storage(&'static str),
+    Conversion(&'static str),
+}
+
+#[derive(Debug)]
+struct InvalidDTO(&'static str);
+
+impl From<InvalidDTO> for TestError {
+    fn from(error: InvalidDTO) -> Self {
+        Self::Conversion(error.0)
+    }
+}
 
 #[derive(Debug, Default)]
 struct TestAggregate(u64);
@@ -70,7 +83,7 @@ impl DTO for TestDTO {
     const NAME: &'static str = "TestDTO";
 
     type ConnectionData = TestConnection;
-    type Error = &'static str;
+    type Error = TestError;
 }
 
 impl From<VersionedSnapshot<TestSnapshot>> for TestDTO {
@@ -84,11 +97,11 @@ impl From<VersionedSnapshot<TestSnapshot>> for TestDTO {
 }
 
 impl TryFrom<TestDTO> for VersionedSnapshot<TestSnapshot> {
-    type Error = &'static str;
+    type Error = InvalidDTO;
 
     fn try_from(value: TestDTO) -> Result<Self, Self::Error> {
         if !value.valid {
-            return Err("invalid DTO");
+            return Err(InvalidDTO("invalid DTO"));
         }
         Ok(Self {
             snapshot: TestSnapshot(value.value),
@@ -117,7 +130,10 @@ impl DTOSelect for TestDTO {
         assert_eq!(sorter, Some(TestDTOSorter::ByValue));
         let pagination = pagination.unwrap();
         assert_eq!((pagination.limit, pagination.offset), (2, 3));
-        conn.error.map_or_else(|| Ok(conn.dtos.clone()), Err)
+        conn.error.map_or_else(
+            || Ok(conn.dtos.clone()),
+            |error| Err(TestError::Storage(error)),
+        )
     }
 }
 
@@ -132,11 +148,11 @@ impl DTORepository for TestRepository {
     const NAME: &'static str = "TestRepository";
 
     type ConnectionData = TestConnection;
-    type Error = &'static str;
+    type Error = TestError;
 
     fn connection(&mut self) -> Result<Self::ConnectionData, Self::Error> {
         if let Some(error) = self.connection_error {
-            return Err(error);
+            return Err(TestError::Storage(error));
         }
         Ok(TestConnection {
             dtos: self.dtos.clone(),
@@ -148,14 +164,10 @@ impl DTORepository for TestRepository {
 impl DTOReadRepository<TestSnapshot> for TestRepository {
     type DTO = TestDTO;
 
-    fn count(
-        &mut self,
-        filters: HashSet<TestFilter>,
-        sorter: Option<TestSorter>,
-    ) -> Result<usize, Self::Error> {
+    fn count(&mut self, filters: HashSet<TestFilter>) -> Result<usize, Self::Error> {
         assert_eq!(filters, HashSet::from([TestFilter(7)]));
-        assert_eq!(sorter, Some(TestSorter));
-        self.error.map_or(Ok(42), Err)
+        self.error
+            .map_or(Ok(42), |error| Err(TestError::Storage(error)))
     }
 }
 
@@ -204,7 +216,7 @@ impl From<VersionedSnapshot<AlternateSnapshot>> for TestDTO {
 }
 
 impl TryFrom<TestDTO> for VersionedSnapshot<AlternateSnapshot> {
-    type Error = &'static str;
+    type Error = InvalidDTO;
 
     fn try_from(value: TestDTO) -> Result<Self, Self::Error> {
         let snapshot = VersionedSnapshot::<TestSnapshot>::try_from(value)?;
@@ -218,20 +230,14 @@ impl TryFrom<TestDTO> for VersionedSnapshot<AlternateSnapshot> {
 impl DTOReadRepository<AlternateSnapshot> for TestRepository {
     type DTO = TestDTO;
 
-    fn count(
-        &mut self,
-        filters: HashSet<AlternateFilter>,
-        sorter: Option<AlternateSorter>,
-    ) -> Result<usize, Self::Error> {
+    fn count(&mut self, filters: HashSet<AlternateFilter>) -> Result<usize, Self::Error> {
         assert!(filters == HashSet::from([AlternateFilter(70)]));
-        assert!(sorter.is_some());
-        self.error.map_or(Ok(42), Err)
+        self.error
+            .map_or(Ok(42), |error| Err(TestError::Storage(error)))
     }
 }
 
-fn get(
-    repository: &mut TestRepository,
-) -> Result<Vec<VersionedSnapshot<TestSnapshot>>, DTORepositoryError<&'static str, &'static str>> {
+fn get(repository: &mut TestRepository) -> Result<Vec<VersionedSnapshot<TestSnapshot>>, TestError> {
     ReadRepository::get(
         repository,
         HashSet::from([TestFilter(7)]),
@@ -321,7 +327,7 @@ fn get_preserves_storage_errors() {
     };
     assert!(matches!(
         get(&mut repository),
-        Err(DTORepositoryError::Repository("storage unavailable"))
+        Err(TestError::Storage("storage unavailable"))
     ));
 }
 
@@ -333,7 +339,7 @@ fn get_preserves_connection_errors() {
     };
     assert!(matches!(
         get(&mut repository),
-        Err(DTORepositoryError::Repository("connection unavailable"))
+        Err(TestError::Storage("connection unavailable"))
     ));
 }
 
@@ -356,30 +362,22 @@ fn get_returns_conversion_errors_instead_of_partial_results() {
     };
     assert!(matches!(
         get(&mut repository),
-        Err(DTORepositoryError::Conversion("invalid DTO"))
+        Err(TestError::Conversion("invalid DTO"))
     ));
 }
 
 #[test]
-fn count_forwards_query_and_preserves_storage_errors() {
+fn count_forwards_filters_and_preserves_storage_errors() {
     let mut repository = TestRepository::default();
     assert_eq!(
-        ReadRepository::<TestSnapshot>::count(
-            &mut repository,
-            HashSet::from([TestFilter(7)]),
-            Some(TestSorter)
-        )
-        .unwrap(),
+        ReadRepository::<TestSnapshot>::count(&mut repository, HashSet::from([TestFilter(7)]))
+            .unwrap(),
         42
     );
 
     repository.error = Some("count unavailable");
     assert!(matches!(
-        ReadRepository::<TestSnapshot>::count(
-            &mut repository,
-            HashSet::from([TestFilter(7)]),
-            Some(TestSorter)
-        ),
-        Err(DTORepositoryError::Repository("count unavailable"))
+        ReadRepository::<TestSnapshot>::count(&mut repository, HashSet::from([TestFilter(7)])),
+        Err(TestError::Storage("count unavailable"))
     ));
 }

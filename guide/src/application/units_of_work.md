@@ -69,6 +69,40 @@ Write repositories are owned by the registry alone, which hands out [`Weak`] poi
 changes hold these pointers, so nothing keeps a write repository alive after its unit of work is gone.
 Acting through one whose unit of work was dropped fails with [`RepositoryDropped`].
 
+### A combined repository
+
+As an alternative, read and write access can share one repository object:
+
+```rust,ignore
+pub trait CounterRepository:
+    ReadRepository<CounterSnapshot, Error = RepositoryError>
+    + WriteRepository<CounterSnapshot, Error = RepositoryError>
+{}
+
+impl<R> CounterRepository for R where
+    R: ReadRepository<CounterSnapshot, Error = RepositoryError>
+        + WriteRepository<CounterSnapshot, Error = RepositoryError>
+{}
+
+pub struct CounterRegistry {
+    counters: Rc<RefCell<dyn CounterRepository>>,
+}
+
+impl CounterRegistry {
+    pub fn counters(&self) -> Weak<RefCell<dyn CounterRepository>> {
+        Rc::downgrade(&self.counters)
+    }
+}
+```
+
+This registry hands out weak references for both reads and writes. Upgrade them for each call,
+returning `RepositoryError::RepositoryDropped` if their unit of work is gone. Keep the registry's
+strong ownership local to its unit of work so pending actions cannot extend repository lifetimes.
+
+The factory is `Send + Sync`, but a registry created on a request's thread need not be. The library's
+[registry-builder callback](../infrastructure/in_memory.md#factory-and-registry-construction) supports
+`Rc<RefCell<_>>` without requiring the registry to implement `Clone`, `Send` or `Sync`.
+
 ## Actionable snapshots
 
 A change waiting for the unit of work to commit is an [`ActionableSnapshot`]: a
@@ -83,7 +117,7 @@ A change waiting for the unit of work to commit is an [`ActionableSnapshot`]: a
 
 They are made from a [`VersionedSnapshot`] in one of two ways:
 
-- `make_actionable(repository, action)` pairs it with the repository and action as is.
+- `make_actionable(repository, action)` pairs it with the repository and action, incrementing its version.
 - `do_and_make_actionable(repository, action, f)` first runs `f` on the aggregate behind the snapshot,
   like [`do_as_aggregate`](./repositories.md#working-on-the-aggregate-behind-a-snapshot), then makes
   the updated snapshot actionable. It also returns the events `f` emitted.

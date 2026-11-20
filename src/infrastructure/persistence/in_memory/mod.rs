@@ -15,9 +15,11 @@ use std::{
 
 use thiserror::Error;
 
+mod connection;
 mod database;
 mod unit_of_work;
 
+pub use connection::InMemoryConnection;
 pub use database::InMemoryDatabase;
 pub use unit_of_work::InMemoryUnitOfWork;
 pub use unit_of_work::InMemoryUnitOfWorkFactory;
@@ -26,6 +28,7 @@ use crate::infrastructure::persistence::DTO;
 
 /// Failure to access the database, find a table or interpret a stored row.
 #[derive(Debug, Error)]
+#[cfg_attr(docsrs, doc(cfg(feature = "in-memory")))]
 pub enum InMemoryRepositoryError {
     /// An application action failed; the unit of work rolls back its writes.
     #[error("action failed: {0}")]
@@ -53,6 +56,7 @@ pub enum InMemoryRepositoryError {
 /// Implementors receive `ConnectionData = Weak<Mutex<InMemoryDatabase>>` and
 /// `Error = InMemoryRepositoryError`. This does not implement DTO operations;
 /// those must upgrade the weak pointer and lock the database themselves.
+#[cfg_attr(docsrs, doc(cfg(feature = "in-memory")))]
 pub trait InMemoryDTO: Debug + Clone {
     /// Storage representation name, forwarded to [`DTO::NAME`].
     const NAME: &'static str;

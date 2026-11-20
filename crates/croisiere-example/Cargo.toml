@@ -6,4 +6,7 @@ edition = "2024"
 [dependencies]
 croisiere = { path = "../..", features = ["in-memory"] }
 anyhow = "1"
+thiserror = { workspace = true }
 crossbeam-channel = "0.5"
+uuid = { version = "1.29.3", features = ["v4"] }
+derive_more = { version = "2.1.1", features = ["from"] }

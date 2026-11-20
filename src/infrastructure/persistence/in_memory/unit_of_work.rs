@@ -3,6 +3,7 @@
 use std::{
     cell::RefCell,
     collections::VecDeque,
+    marker::PhantomData,
     sync::{Arc, Mutex, Weak},
 };
 
@@ -18,31 +19,41 @@ use crate::{
 ///
 /// # Transaction boundaries
 ///
-/// Callers must prevent concurrent writes while committing: actions acquire
-/// the database lock themselves, so it cannot be held across the whole batch.
+/// Use [`Self::with_commit_gate`] with a shared lock, or prevent concurrent
+/// writes externally. Actions acquire the database lock themselves, so the
+/// database lock cannot be held across the whole batch.
 /// Rollback restores cloned rows and follows their `Clone` semantics.
-pub struct InMemoryUnitOfWork<R> {
+#[cfg_attr(docsrs, doc(cfg(feature = "in-memory")))]
+pub struct InMemoryUnitOfWork<R, E = InMemoryRepositoryError> {
     registry: R,
 
     writer: Weak<Mutex<InMemoryDatabase>>,
-    actions:
-        RefCell<VecDeque<Box<dyn AbstractActionableSnapshot<Error = InMemoryRepositoryError>>>>,
+    actions: RefCell<VecDeque<Box<dyn AbstractActionableSnapshot<Error = E>>>>,
+    commit_gate: Option<Arc<Mutex<()>>>,
 }
 
-impl<R> InMemoryUnitOfWork<R> {
+impl<R, E> InMemoryUnitOfWork<R, E> {
     /// Creates a unit of work with `registry`, a weak writer and no actions.
     pub fn new(registry: R, writer: Weak<Mutex<InMemoryDatabase>>) -> Self {
         Self {
             registry,
             writer,
             actions: RefCell::new(VecDeque::new()),
+            commit_gate: None,
         }
+    }
+
+    /// Shares a lock across commits and, optionally, repository reads.
+    /// Every writer to this database must use the same gate.
+    pub fn with_commit_gate(mut self, gate: Arc<Mutex<()>>) -> Self {
+        self.commit_gate = Some(gate);
+        self
     }
 }
 
-impl<R> UnitOfWork for InMemoryUnitOfWork<R> {
+impl<R, E: From<InMemoryRepositoryError>> UnitOfWork for InMemoryUnitOfWork<R, E> {
     type Registry = R;
-    type Error = InMemoryRepositoryError;
+    type Error = E;
 
     /// Returns the registry supplied at construction.
     fn registry(&self) -> &Self::Registry {
@@ -60,10 +71,19 @@ impl<R> UnitOfWork for InMemoryUnitOfWork<R> {
     /// Executes queued actions in FIFO order, restoring a saved database on error.
     ///
     /// The entire batch is consumed on success or failure. No database lock is
-    /// held while actions run. Callers must serialize writes during this method.
+    /// held while actions run. A configured commit gate is held across the
+    /// entire batch and rollback; otherwise callers must serialize writes.
     /// Action panics propagate without rollback.
     fn commit_and_rollback(&self) -> Result<(), Self::Error> {
         let actions = std::mem::take(&mut *self.actions.borrow_mut());
+        let _guard = self
+            .commit_gate
+            .as_ref()
+            .map(|gate| {
+                gate.lock()
+                    .map_err(|_| InMemoryRepositoryError::DatabasePoisoned)
+            })
+            .transpose()?;
         let database = self
             .writer
             .upgrade()
@@ -87,36 +107,54 @@ impl<R> UnitOfWork for InMemoryUnitOfWork<R> {
     }
 }
 
-/// Factory holding a registry template and the shared database.
+/// Factory creating registries and units of work over a shared database.
 ///
-/// `begin` clones the registry and gives the new unit of work a weak database
-/// pointer. It does not construct repositories or open a transaction. Registry
-/// cloning semantics determine which repository state is shared.
-///
-/// Commits require callers to
-/// serialize database writes; see [`InMemoryUnitOfWork`].
-pub struct InMemoryUnitOfWorkFactory<R>
-where
-    R: Clone,
-{
-    registry: R,
+/// The builder is shared across threads, but the registries it creates need
+/// not be `Send`, `Sync` or `Clone`. Each `begin` invokes the builder with the
+/// weak database handle and the factory's commit gate. Repositories may use
+/// the same gate for reads. Every writer must respect it.
+#[cfg_attr(docsrs, doc(cfg(feature = "in-memory")))]
+pub struct InMemoryUnitOfWorkFactory<R, E = InMemoryRepositoryError> {
+    registry_builder: Box<dyn Fn(Weak<Mutex<InMemoryDatabase>>, Arc<Mutex<()>>) -> R + Send + Sync>,
     database: Arc<Mutex<InMemoryDatabase>>,
+    commit_gate: Arc<Mutex<()>>,
+    error: PhantomData<fn() -> E>,
 }
 
-impl<R: Clone> InMemoryUnitOfWorkFactory<R> {
-    /// Creates a factory using a registry template and a shared database.
+impl<R: Clone + Send + Sync + 'static> InMemoryUnitOfWorkFactory<R> {
+    /// Creates a factory cloning a registry template for each unit of work.
     pub fn new(registry: R, database: Arc<Mutex<InMemoryDatabase>>) -> Self {
-        Self { registry, database }
+        Self::from_registry_factory(database, move |_, _| registry.clone())
     }
 }
 
-impl<R: Clone + Send + Sync + 'static> UnitOfWorkFactory for InMemoryUnitOfWorkFactory<R> {
-    type Error = InMemoryRepositoryError;
+impl<R, E> InMemoryUnitOfWorkFactory<R, E> {
+    /// Creates fresh registries using the database and commit gate supplied
+    /// by the factory. The builder must not retain registries or repositories
+    /// across calls if they should expire with their unit of work.
+    pub fn from_registry_factory(
+        database: Arc<Mutex<InMemoryDatabase>>,
+        builder: impl Fn(Weak<Mutex<InMemoryDatabase>>, Arc<Mutex<()>>) -> R + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            registry_builder: Box::new(builder),
+            database,
+            commit_gate: Arc::new(Mutex::new(())),
+            error: PhantomData,
+        }
+    }
+}
+
+impl<R: 'static, E: From<InMemoryRepositoryError> + 'static> UnitOfWorkFactory
+    for InMemoryUnitOfWorkFactory<R, E>
+{
+    type Error = E;
     type Registry = R;
 
-    /// Clones the registry and creates a unit of work with an empty queue.
-    fn begin(&self) -> Box<dyn UnitOfWork<Error = Self::Error, Registry = Self::Registry>> {
+    /// Builds a registry and creates an empty unit of work sharing the commit gate.
+    fn begin(&self) -> Box<dyn UnitOfWork<Error = E, Registry = R>> {
         let weak = Arc::downgrade(&self.database);
-        Box::new(InMemoryUnitOfWork::new(self.registry.clone(), weak))
+        let registry = (self.registry_builder)(weak.clone(), self.commit_gate.clone());
+        Box::new(InMemoryUnitOfWork::new(registry, weak).with_commit_gate(self.commit_gate.clone()))
     }
 }

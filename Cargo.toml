@@ -3,6 +3,10 @@ name = "croisiere"
 version = "0.1.0"
 edition = "2024"
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [dependencies]
 croisiere-proc = { path = "crates/croisiere-proc" }
 crossbeam-channel = { workspace = true }
@@ -22,5 +26,5 @@ thiserror = "2.0.21"
 trybuild = "1"
 
 [features]
-default = ["in-memory"]
+default = []
 in-memory = []

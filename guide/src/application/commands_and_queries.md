@@ -45,6 +45,10 @@ pub type Uow = Box<dyn UnitOfWork<Error = RepositoryError, Registry = Registry>>
 
 The request then reaches the repositories through its [registry](./units_of_work.md#the-registry).
 
+Alternatively, pass the shared `Factory` as the context and call `factory.begin()` inside `handle`.
+A read-only query uses the registry without registering actions or committing. Both approaches keep
+storage construction in infrastructure.
+
 A query only needs the unit of work. A command also needs somewhere to send the events its aggregates
 emit: the [event bus](./event_bus.md), which sends them to every event service.
 
@@ -148,7 +152,7 @@ impl Command for OpenAccount {
 
         let existing = registry
             .read_accounts()
-            .count(HashSet::from([AccountFilter::ById(self.id)]), None)?;
+            .count(HashSet::from([AccountFilter::ById(self.id)]))?;
         if existing > 0 {
             return Err(AppError::AlreadyExists(self.id));
         }
@@ -220,6 +224,79 @@ impl Query for AccountsOf {
 
 A query can respond with the snapshots themselves, or with a view of its own shaped for whoever asked.
 
+## Application-wide commands and queries
+
+> [!TIP]
+> **Define a global command enum and a global query enum, and implement `Command` and `Query`
+> for them.** Each variant wraps a specific request and delegates to its implementation. This gives
+> the application a common entry point for each kind of request. A shared handling routine can
+> fetch or construct common context once per request before dispatching it, rather than repeating
+> that setup in every presentation entry point.
+
+The commands above already share their context, response and error types, so their enum can
+delegate directly:
+
+```rust,ignore
+pub enum AppCommand {
+    OpenAccount(OpenAccount),
+    Deposit(Deposit),
+}
+
+impl Command for AppCommand {
+    type Context = CommandContext;
+    type Response = CommandResponse;
+    type Error = AppError;
+
+    fn name(&self) -> &'static str {
+        match self {
+            Self::OpenAccount(command) => command.name(),
+            Self::Deposit(command) => command.name(),
+        }
+    }
+
+    fn handle(&self, context: CommandContext) -> Result<CommandResponse, AppError> {
+        match self {
+            Self::OpenAccount(command) => command.handle(context),
+            Self::Deposit(command) => command.handle(context),
+        }
+    }
+}
+```
+
+Apply the same pattern to queries. If their responses differ, wrap each response in a variant of a
+global response enum:
+
+```rust,ignore
+pub enum AppQuery {
+    AccountsOf(AccountsOf),
+}
+
+pub enum QueryResponse {
+    Accounts(AccountsResponse),
+}
+
+impl Query for AppQuery {
+    type Context = Uow;
+    type Response = QueryResponse;
+    type Error = AppError;
+
+    fn name(&self) -> &'static str {
+        match self {
+            Self::AccountsOf(query) => query.name(),
+        }
+    }
+
+    fn handle(&self, context: Uow) -> Result<QueryResponse, AppError> {
+        match self {
+            Self::AccountsOf(query) => query.handle(context).map(QueryResponse::Accounts),
+        }
+    }
+}
+```
+
+Add variants as the application gains requests. Keep the enums focused on dispatch; business rules
+stay in the domain, and each concrete command or query keeps its own use-case implementation.
+
 ## Running them
 
 Whoever receives requests from the outside world, such as a web server or a command-line interface,
@@ -247,7 +324,24 @@ let response = execute(&factory, &bus, Deposit { id: 1, cents: 500 })?;
 let accounts = ask(&factory, AccountsOf { owner: "Ada".into(), pagination: None })?;
 ```
 
-This is also the place to use `name`, for example to log every request.
+The same routines accept the global enums, since those enums implement the traits too:
+
+```rust,ignore
+let response = execute(
+    &factory,
+    &bus,
+    AppCommand::Deposit(Deposit { id: 1, cents: 500 }),
+)?;
+let accounts = ask(
+    &factory,
+    AppQuery::AccountsOf(AccountsOf { owner: "Ada".into(), pagination: None }),
+)?;
+```
+
+These routines prepare a fresh context for each request. They are also a place to fetch shared
+request information, such as the authenticated actor, and use `name` to log requests consistently.
+If every caller should go through the global enums, accept `AppCommand` and `AppQuery` directly
+instead of generic parameters.
 
 [`Command`]: https://docs.rs/croisiere/latest/croisiere/application/trait.Command.html
 [`Query`]: https://docs.rs/croisiere/latest/croisiere/application/trait.Query.html

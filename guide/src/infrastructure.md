@@ -26,7 +26,7 @@ One DTO can support more than one snapshot type.
 | [DTOs](./infrastructure/dtos.md) | Describe storage data, connections, errors and select/insert/update/delete operations. |
 | [Repositories](./infrastructure/repositories.md) | Adapt those operations to the application's `ReadRepository` and `WriteRepository` traits. |
 | [Units of work](./infrastructure/units_of_work.md) | Connect repositories to a transaction and commit registered changes together. |
-| [In-memory storage](./infrastructure/in_memory.md) | Backend under development, with type-erased tables and an unfinished unit of work. |
+| [In-memory storage](./infrastructure/in_memory.md) | Type-erased tables, snapshot rollback, and a factory that builds fresh registries. |
 
 The DTO adapters supply the read/write plumbing. The storage implementation must still define query
 semantics, identifier handling, version checks and transaction boundaries. A successful adapter call
@@ -35,10 +35,18 @@ does not by itself mean that a transaction has committed.
 ## Current scope
 
 The persistence API exports `InternalId`, `DTO`, `DTOSelect`, `DTOInsert`, `DTOUpdate`, `DTODelete`,
-`DTORepository`, `DTOReadRepository`, `DTOWriteRepository` and `DTORepositoryError`. Import them from
+`DTORepository`, `DTOReadRepository` and `DTOWriteRepository`. Import them from
 `croisiere::infrastructure::persistence`; their source submodules are private.
 
 The `in_memory` module is available with the `in-memory` feature, which is enabled by default.
-It does not yet provide a complete storage backend: its unit of work still has `todo!()` in
-`commit_and_rollback`. The hand-written storage and transaction examples in this guide explain how
-to implement a backend; those example types are separate from the crate's in-memory types.
+The backend provides `InMemoryDatabase`, `InMemoryUnitOfWork<R, E>` and
+`InMemoryUnitOfWorkFactory<R, E>`. The factory can build a fresh registry for each request using a
+callback supplied by your infrastructure. Its commit gate serializes writes and rollback; repository
+reads can share the same gate.
+
+Use these library types when storing data in memory. Implement DTO operations and registry
+construction for your application; you do not need a second repository wrapper, action adapter,
+unit-of-work implementation or factory implementation.
+
+The [counter example](./examples/counter_example.md) puts the layers together. It keeps the
+counter's name as its domain identity and a generated UUID as a separate storage identifier.

@@ -1,53 +1,67 @@
+//! Separate read and write repository access within a unit of work.
+
 use std::{
     cell::RefCell,
     rc::{Rc, Weak},
     sync::Arc,
 };
 
-use croisiere::application::{ReadRepository, UnitOfWorkFactory, WriteRepository};
+use croisiere::application::{ReadRepository, UnitOfWork, UnitOfWorkFactory, WriteRepository};
 
-use crate::application::{errors::AppError, snapshots::CounterSnapshot};
+use crate::application::{errors::RepositoryError, snapshots::CounterSnapshot};
 
-/// Read and write access to counters, as one trait object.
-pub trait CounterRepository:
-    ReadRepository<CounterSnapshot, Error = AppError> + WriteRepository<CounterSnapshot, Error = AppError>
-{
-}
+/// Read access using the application's shared repository error.
+pub type DynReadRepository<S> = dyn ReadRepository<S, Error = RepositoryError>;
 
-impl<R> CounterRepository for R where
-    R: ReadRepository<CounterSnapshot, Error = AppError>
-        + WriteRepository<CounterSnapshot, Error = AppError>
-{
-}
+/// Write access using the application's shared repository error.
+pub type DynWriteRepository<S> = dyn WriteRepository<S, Error = RepositoryError>;
+
+/// Creates an owned reader of committed storage, independent of the registry.
+pub type ReadRepositoryFactory<S> = Box<dyn Fn() -> Box<DynReadRepository<S>>>;
+
+/// Writer owned by the registry and borrowed weakly by pending actions.
+pub type SharedWriteRepository<S> = Rc<RefCell<DynWriteRepository<S>>>;
 
 /// Repositories available within a unit of work, one per snapshot type.
 ///
-/// The registry is the only owner of its repositories: it hands out weak
-/// pointers only, so pending actions (and anything else) never keep a
-/// repository alive past its unit of work.
+/// Readers are created on demand and owned by their callers. Writers stay
+/// owned by the registry, which only hands out weak pointers to them, so
+/// pending actions cannot extend their lifetime beyond the unit of work.
 pub struct Registry {
-    counters: Rc<RefCell<dyn CounterRepository>>,
+    /// Builds readers that observe committed rows through the shared gate.
+    read_counters: ReadRepositoryFactory<CounterSnapshot>,
+    /// Sole strong owner of the writer used by this unit of work's actions.
+    write_counters: SharedWriteRepository<CounterSnapshot>,
 }
 
 impl Registry {
     /// Called by the infrastructure when it starts a unit of work.
-    pub fn new(counters: Rc<RefCell<dyn CounterRepository>>) -> Self {
-        Self { counters }
+    pub fn new(
+        read_counters: ReadRepositoryFactory<CounterSnapshot>,
+        write_counters: SharedWriteRepository<CounterSnapshot>,
+    ) -> Self {
+        Self {
+            read_counters,
+            write_counters,
+        }
     }
 
-    /// The counter repository, e.g. for `make_actionable`, or to read from
-    /// with [`upgrade`].
-    pub fn counters(&self) -> Weak<RefCell<dyn CounterRepository>> {
-        Rc::downgrade(&self.counters)
+    /// Creates a reader that can outlive this unit of work.
+    ///
+    /// Reads see committed storage, not this unit of work's pending actions.
+    /// The backing factory must remain alive for database access to succeed.
+    pub fn read_counters(&self) -> Box<DynReadRepository<CounterSnapshot>> {
+        (self.read_counters)()
+    }
+
+    /// Borrows the writer weakly for `make_actionable` and related helpers.
+    pub fn write_counters(&self) -> Weak<RefCell<DynWriteRepository<CounterSnapshot>>> {
+        Rc::downgrade(&self.write_counters)
     }
 }
 
-/// Upgrades a repository pointer for a single call, failing with
-/// [`AppError::RepositoryDropped`] if its unit of work is gone.
-pub fn upgrade<T: ?Sized>(repository: &Weak<T>) -> Result<Rc<T>, AppError> {
-    repository.upgrade().ok_or(AppError::RepositoryDropped)
-}
+/// Request-scoped unit of work supplied to command and query handlers.
+pub type Uow = Box<dyn UnitOfWork<Error = RepositoryError, Registry = Registry>>;
 
-/// What commands and queries receive: the infrastructure provides the
-/// implementation.
-pub type Factory = Arc<dyn UnitOfWorkFactory<Error = AppError, Registry = Registry>>;
+/// Shared factory used by the command and query handling routines.
+pub type Factory = Arc<dyn UnitOfWorkFactory<Error = RepositoryError, Registry = Registry>>;

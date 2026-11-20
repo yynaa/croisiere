@@ -17,6 +17,7 @@ use crate::infrastructure::persistence::in_memory::InMemoryRepositoryError;
 /// implementation. A clone can be assigned back to restore a saved database.
 /// Shared mutable state inside a row remains shared if its `Clone` does so.
 #[derive(Clone, Default)]
+#[cfg_attr(docsrs, doc(cfg(feature = "in-memory")))]
 pub struct InMemoryDatabase {
     tables: HashMap<String, InMemoryDatabaseTable>,
 }

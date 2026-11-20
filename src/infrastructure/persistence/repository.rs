@@ -7,21 +7,6 @@ use crate::{
     infrastructure::persistence::{DTO, DTOInsert, DTOSelect, DTOUpdate, dto::DTODelete},
 };
 
-/// Storage or DTO-to-snapshot conversion failure from a repository adapter.
-///
-/// `R` is the repository's storage error and `C` the error from
-/// `VersionedSnapshot<S>::try_from(dto)`. Both read and write adapters use
-/// this type, although writes only produce [`Repository`](Self::Repository).
-#[derive(Debug, thiserror::Error)]
-pub enum DTORepositoryError<R, C> {
-    /// Acquiring a connection or performing a storage operation failed.
-    #[error("repository read failed: {0}")]
-    Repository(R),
-    /// A selected DTO could not be converted into a versioned snapshot.
-    #[error("DTO conversion failed: {0}")]
-    Conversion(C),
-}
-
 /// Provides the storage handle shared by a repository's DTO operations.
 ///
 /// For the application-repository blanket implementations, `ConnectionData`
@@ -33,7 +18,7 @@ pub trait DTORepository {
     /// Owned handle passed to DTO operations, for example a pooled connection
     /// or a handle to a transaction owned by a unit of work.
     type ConnectionData;
-    /// Connection-acquisition and storage-operation error.
+    /// Shared error for DTO operations and application repositories.
     type Error;
 
     /// Acquires the handle for one repository call.
@@ -47,7 +32,9 @@ pub trait DTORepository {
 ///
 /// Provides [`ReadRepository`] when `VersionedSnapshot<S>: TryFrom<Self::DTO>`,
 /// the DTO's filter and sorter implement `From<S::Filter>` and
-/// `From<S::Sorter>`, and the connection and error types match.
+/// `From<S::Sorter>`, and the connection and storage error types match.
+/// The shared error must implement `From` for the DTO-to-snapshot conversion
+/// error. Connection and storage failures propagate directly.
 ///
 /// `get` acquires one connection, converts the criteria, calls
 /// [`DTOSelect::select`] and converts the returned DTOs in order. A failure
@@ -63,13 +50,9 @@ where
     /// Returns the number of snapshots matching application-level criteria.
     ///
     /// Unlike `get`, the blanket [`ReadRepository::count`] implementation
-    /// forwards filters and sorter here without conversion or acquiring a
+    /// forwards filters here without conversion or acquiring a
     /// connection. Implement connection access and criteria translation here.
-    fn count(
-        &mut self,
-        filters: HashSet<S::Filter>,
-        sorter: Option<S::Sorter>,
-    ) -> Result<usize, Self::Error>;
+    fn count(&mut self, filters: HashSet<S::Filter>) -> Result<usize, Self::Error>;
 }
 
 impl<
@@ -82,8 +65,9 @@ where
     VersionedSnapshot<S>: TryFrom<D>,
     D::Filter: From<S::Filter>,
     D::Sorter: From<S::Sorter>,
+    R::Error: From<<VersionedSnapshot<S> as TryFrom<D>>::Error>,
 {
-    type Error = DTORepositoryError<R::Error, <VersionedSnapshot<S> as TryFrom<D>>::Error>;
+    type Error = R::Error;
 
     fn get(
         &mut self,
@@ -92,24 +76,19 @@ where
         pagination: Option<Pagination>,
     ) -> Result<Vec<VersionedSnapshot<S>>, Self::Error> {
         let dtos = D::select(
-            &mut R::connection(self).map_err(DTORepositoryError::Repository)?,
+            &mut R::connection(self)?,
             filters.into_iter().map(Into::into).collect(),
             sorter.map(Into::into),
             pagination,
-        )
-        .map_err(DTORepositoryError::Repository)?;
+        )?;
 
         dtos.into_iter()
-            .map(|dto| VersionedSnapshot::try_from(dto).map_err(DTORepositoryError::Conversion))
+            .map(|dto| VersionedSnapshot::try_from(dto).map_err(Into::into))
             .collect()
     }
 
-    fn count(
-        &mut self,
-        filters: HashSet<<S as Snapshot>::Filter>,
-        sorter: Option<<S as Snapshot>::Sorter>,
-    ) -> Result<usize, Self::Error> {
-        DTOReadRepository::count(self, filters, sorter).map_err(DTORepositoryError::Repository)
+    fn count(&mut self, filters: HashSet<<S as Snapshot>::Filter>) -> Result<usize, Self::Error> {
+        DTOReadRepository::count(self, filters)
     }
 }
 
@@ -117,8 +96,8 @@ where
 ///
 /// Provides [`WriteRepository`] when the DTO implements the three write
 /// operation traits and `From<VersionedSnapshot<S>>`, connection and error
-/// types match, and `VersionedSnapshot<S>: TryFrom<Self::DTO>`. The latter
-/// bound supplies the conversion error type; writes do not convert DTOs back.
+/// types match. DTO failures propagate directly as the shared error.
+/// Writes do not require DTO-to-snapshot conversions.
 ///
 /// Each batch acquires one connection, clones and converts each snapshot,
 /// and processes them in input order. Saving uses [`exists`](Self::exists)
@@ -136,9 +115,10 @@ where
     /// Whether saving `dto` should update an existing row rather than insert.
     ///
     /// Called once per DTO during `save`, after the batch connection is
-    /// acquired. No connection is passed to this method and it cannot return
-    /// an error; the implementation supplies its own access to storage.
-    fn exists(&mut self, dto: &Self::DTO) -> bool;
+    /// acquired. No connection is passed to this method; the implementation
+    /// supplies its own access to storage. Errors stop the save batch before
+    /// inserting or updating this DTO.
+    fn exists(&mut self, dto: &Self::DTO) -> Result<bool, Self::Error>;
 }
 
 impl<
@@ -151,29 +131,26 @@ impl<
         + From<VersionedSnapshot<S>>,
     R: DTOWriteRepository<S, DTO = D, ConnectionData = C>,
 > WriteRepository<S> for R
-where
-    VersionedSnapshot<S>: TryFrom<D>,
 {
-    type Error = DTORepositoryError<R::Error, <VersionedSnapshot<S> as TryFrom<D>>::Error>;
+    type Error = R::Error;
 
     fn save(&mut self, snapshots: Vec<&VersionedSnapshot<S>>) -> Result<(), Self::Error> {
-        let mut conn = R::connection(self).map_err(DTORepositoryError::Repository)?;
+        let mut conn = R::connection(self)?;
         for s in snapshots {
             let d = s.clone().into();
-            match self.exists(&d) {
+            match self.exists(&d)? {
                 false => D::insert(d, &mut conn),
                 true => D::update(d, &mut conn),
-            }
-            .map_err(DTORepositoryError::Repository)?;
+            }?;
         }
         Ok(())
     }
 
     fn delete(&mut self, snapshots: Vec<&VersionedSnapshot<S>>) -> Result<(), Self::Error> {
-        let mut conn = R::connection(self).map_err(DTORepositoryError::Repository)?;
+        let mut conn = R::connection(self)?;
         for s in snapshots {
             let d = s.clone().into();
-            D::delete(d, &mut conn).map_err(DTORepositoryError::Repository)?;
+            D::delete(d, &mut conn)?;
         }
         Ok(())
     }

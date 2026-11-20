@@ -200,7 +200,7 @@ be made from their domain type with `From`.
 
 ## Aggregate functions
 
-The behaviour of an aggregate is written in an impl block marked with [`#[aggregate_functions]`]. These
+The behaviour of an aggregate is written in an impl block marked with [`#[aggregate_functions]`][aggregate-functions-macro]. These
 functions are the only place where the aggregate changes:
 
 ```rust,ignore
@@ -234,12 +234,12 @@ impl AccountAggregate {
 
 The attribute gives the impl block result types built from the aggregate's events and errors:
 
-| Type                 | Result of                                    | On success                       |
-|----------------------|----------------------------------------------|----------------------------------|
-| `CreationResult`     | creating an aggregate                        | the aggregate and its events     |
-| `ActionResult`       | an action on an existing aggregate           | the emitted events               |
-| `CheckResult`        | a check                                      | nothing                          |
-| `AggregateResult<T>` | anything else                                | a `T`                            |
+| Type                 | Result of                          | On success                   |
+| -------------------- | ---------------------------------- | ---------------------------- |
+| `CreationResult`     | creating an aggregate              | the aggregate and its events |
+| `ActionResult`       | an action on an existing aggregate | the emitted events           |
+| `CheckResult`        | a check                            | nothing                      |
+| `AggregateResult<T>` | anything else                      | a `T`                        |
 
 All of them fail with the aggregate's error.
 
@@ -249,8 +249,24 @@ these types live. Functions called from outside the aggregate must therefore be 
 Since the aggregate owns its parts, changing a field in place, as `deposit` does, is the same as
 replacing the whole value: no one else holds a reference to it that could observe the change.
 
+> [!TIP]
+> **Accept unvalidated data and validate it in the domain.** Prefer simple argument types such as
+> `String`, numbers and enums that callers can supply without performing domain validation first.
+> Aggregate functions construct validated [value objects](./value_objects.md) from these inputs
+> and enforce rules involving the aggregate's state. Propagate value object errors rather than
+> duplicating their validation.
+
+> [!TIP]
+> **Validate data regardless of its source.** Application snapshots, API inputs and presentation
+> inputs should carry simple, unvalidated types. A database stores values, not proof that those
+> values satisfy the domain's current rules. Its constraints may be weaker: a basic email check
+> in storage does not replace the application's validation against the relevant email RFC rules.
+> Even data believed to be valid must be validated when it enters or re-enters the domain,
+> including when restoring an aggregate from a snapshot. This also lets the domain reject
+> corrupted stored data that violates its invariants.
+
 [`Aggregate`]: https://docs.rs/croisiere/latest/croisiere/domain/trait.Aggregate.html
 [`Aggregate::Event`]: https://docs.rs/croisiere/latest/croisiere/domain/trait.Aggregate.html#associatedtype.Event
 [`Aggregate::Error`]: https://docs.rs/croisiere/latest/croisiere/domain/trait.Aggregate.html#associatedtype.Error
 [`make_aggregate!`]: https://docs.rs/croisiere/latest/croisiere/domain/macro.make_aggregate.html
-[`#[aggregate_functions]`]: https://docs.rs/croisiere/latest/croisiere/domain/attr.aggregate_functions.html
+[aggregate-functions-macro]: https://docs.rs/croisiere/latest/croisiere/domain/attr.aggregate_functions.html

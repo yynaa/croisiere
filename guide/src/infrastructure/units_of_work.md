@@ -1,172 +1,100 @@
 # Infrastructure: Units of Work
 
-The application describes [units of work](../application/units_of_work.md) with the [`UnitOfWork`]
-and [`UnitOfWorkFactory`] traits. The infrastructure implements them for its storage, together with
-the [repositories](./repositories.md) they hand out.
+A unit of work owns the repositories and pending snapshot actions for one request. Its
+`commit_and_rollback()` method runs those actions as one transaction: an error must undo earlier
+writes in the same batch. The application registers changes against the
+[`UnitOfWork`](../application/units_of_work.md) trait; infrastructure supplies the transaction.
 
-This page continues the hand-written storage kept in memory from the repositories page. These
-types illustrate a complete commit path; they are separate from the crate's
-[in-memory backend](./in_memory.md), whose snapshot rollback requires callers to serialize writes.
+## Using the in-memory implementation
 
-## Using DTO repositories
+For storage in memory, use the library's `InMemoryUnitOfWork<R, E>` and
+`InMemoryUnitOfWorkFactory<R, E>`. Implement the DTO operations and construct your application's
+registry. The library handles the action queue, commit and rollback.
 
-A unit of work can use [DTO repository adapters](./repositories.md#dto-repository-adapters), but
-the adapters do not manage a transaction. Its write repositories must return handles to the same
-transaction from `DTORepository::connection`, so all DTO writes participate in one commit.
-Connections returned by different write batches must still refer to that transaction.
+The factory's registry builder receives the database handle and commit gate. Each `begin()` creates
+fresh repositories connected to that storage and returns a library unit of work. This supports a
+shared factory with registries containing `Rc<RefCell<_>>` repositories local to each request.
+See [factory construction](./in_memory.md#factory-and-registry-construction) and the
+[counter example](../examples/counter_example.md#constructing-the-factory).
 
-On commit, call `act()` on the registered changes, then commit the storage transaction only if every
-action succeeds. On any failure, roll it back and return the error. In particular, updates and
-deletes include `version = incoming_version - 1` in the write's `WHERE` clause. If the affected-row
-count is zero, report a version mismatch and roll back the whole transaction, including any writes
-that succeeded before it. The write itself checks the version; a separate read is insufficient.
-
-The registered actions and the unit of work must share the same error type, including the
-`RepositoryDropped` conversion required by actionable snapshots. The DTO adapter error does not
-currently supply that conversion; provide an integration wrapper before wiring it into a registry.
-
-## A hand-written unit of work
-
-## The unit of work
-
-A unit of work holds the registry it hands out, and the changes registered on it until it commits:
+You can also construct a library unit of work directly:
 
 ```rust,ignore
-use std::{cell::RefCell, rc::Rc};
+use croisiere::infrastructure::persistence::in_memory::InMemoryUnitOfWork;
 
-use croisiere::application::{AbstractActionableSnapshot, UnitOfWork};
-
-type Actions = Vec<Box<dyn AbstractActionableSnapshot<Error = RepositoryError>>>;
-
-pub struct InMemoryUnitOfWork {
-    database: SharedDatabase,
-    registry: Registry,
-    /// Shared with the write repositories of the registry.
-    staged: Rc<RefCell<Vec<StagedWrite>>>,
-    actions: RefCell<Actions>,
-}
+let uow = InMemoryUnitOfWork::<Registry, RepositoryError>::new(registry, database_handle)
+    .with_commit_gate(shared_gate);
 ```
 
-`registry` and `register_action` only hand out and keep what they are given:
+Here, `database_handle` is a `Weak<Mutex<InMemoryDatabase>>` and `shared_gate` is an
+`Arc<Mutex<()>>`. Every writer to the same database must respect the same gate. The library factory
+supplies it automatically to the units of work it creates and to their registry builders.
+
+## One repository error
+
+DTO operations, repositories and registered actions share the application's `RepositoryError`.
+Use that same type as the unit of work's `E`. It converts from `RepositoryDropped` for actionable
+snapshots and from `InMemoryRepositoryError` for backend failures.
+
+The application can remain database-agnostic:
 
 ```rust,ignore
-impl UnitOfWork for InMemoryUnitOfWork {
-    type Error = RepositoryError;
-    type Registry = Registry;
+// Application layer:
+#[derive(Debug)]
+pub enum RepositoryError {
+    RepositoryDropped,
+    ImplementationError(anyhow::Error),
+}
 
-    fn registry(&self) -> &Registry {
-        &self.registry
-    }
-
-    fn register_action(&self, actionable_snapshot: Box<dyn AbstractActionableSnapshot<Error = RepositoryError>>) {
-        self.actions.borrow_mut().push(actionable_snapshot);
-    }
-
-    fn commit_and_rollback(&self) -> Result<(), RepositoryError> {
-        // ...
+// Infrastructure layer:
+impl From<InMemoryRepositoryError> for RepositoryError {
+    fn from(error: InMemoryRepositoryError) -> Self {
+        Self::ImplementationError(anyhow::Error::new(error))
     }
 }
 ```
 
-### Committing
+The concrete infrastructure error is retained inside `anyhow::Error`. An action's repository error
+is returned unchanged after rollback. Commands and queries convert it into their broader `AppError`
+with `From<RepositoryError>`. There is no need for an action adapter or a second unit of work just
+to translate errors. See [repository errors](../application/repositories.md#the-repository-error).
 
-`commit_and_rollback` stores every registered change as one transaction: if any of them fails, none of
-them is stored, and the error is returned.
+## Commit and rollback
 
-Each change is performed by calling `act()` on it, which calls `save` or `delete` on its write
-repository. Here, that only stages the writes. They are then applied to a copy of the storage, which
-replaces it only if every write succeeded:
+Registration queues an action without performing a write. On commit, the in-memory implementation
+consumes the pending batch, acquires its commit gate if configured, and clones the database. It runs
+actions in registration order. If an action returns an error, it restores the saved database and
+returns that error. All actions in the batch are discarded, including those not reached after a
+failure; a later commit cannot accidentally retry them.
 
-```rust,ignore
-fn commit_and_rollback(&self) -> Result<(), RepositoryError> {
-    let actions = std::mem::take(&mut *self.actions.borrow_mut());
-    for mut action in actions {
-        if let Err(error) = action.act() {
-            self.staged.borrow_mut().clear();
-            return Err(error);
-        }
-    }
-    let staged = std::mem::take(&mut *self.staged.borrow_mut());
+Dropping an uncommitted unit of work discards its actions. Action panics propagate without rollback.
+Cloned rows must not share mutable state if rollback is expected to restore that state. The storage
+lasts only as long as an owner retains the database, normally the factory.
 
-    let mut database = self.database.lock().map_err(|_| RepositoryError::Storage("poisoned".into()))?;
-    let mut transaction = Database {
-        accounts: database.accounts.clone(),
-    };
-    for write in staged {
-        transaction.apply(write)?;
-    }
-    *database = transaction;
-    Ok(())
-}
-```
+## Database locks and the commit gate
 
-The storage stays locked from the first write to the last, so no other unit of work can commit in
-between.
+The database mutex protects individual table operations. DTO operations lock and unlock it
+separately, so it does not make a whole batch atomic. Without commit serialization, another request
+could write between two actions. If the first request then failed, restoring its backup could erase
+the second request's successful write.
 
-With an actual database, `commit_and_rollback` calls `act()` on every change, which writes through the
-database transaction, then commits that transaction. If anything fails, including a write that
-modifies zero rows because its version predicate does not match, it rolls the transaction back
-instead. Discard pending writes when an action fails so they cannot be committed by a later retry.
+The commit gate covers the whole batch, including backup and rollback. Readers can share it to avoid
+seeing intermediate writes. Holding the database mutex across the batch would also exclude other
+writers, but the current DTO operations would deadlock when they tried to lock that mutex again.
+The separate gate follows from this connection design. A transaction-scoped connection that owns
+one database lock for the whole commit could use that lock instead.
 
-## The factory
+Use one factory per shared database, or otherwise arrange for every writer to use the same gate.
+Independent factories create independent gates even when they receive the same database handle.
 
-The factory starts units of work. It is shared by every request, possibly across threads, hence the
-`Sync + Send` bound of [`UnitOfWorkFactory`]. Here, it only holds the shared storage:
+## Other storage backends
 
-```rust,ignore
-use croisiere::application::UnitOfWorkFactory;
+For a SQL backend or another storage system, implement `UnitOfWork` and `UnitOfWorkFactory` around
+its transaction API. Connections returned by the repositories must participate in that same
+transaction. Execute every action, commit only if all succeed, and roll back on the first error.
+The DTO repository blanket implementations stop on errors but do not provide transactions.
 
-#[derive(Clone, Default)]
-pub struct InMemoryFactory {
-    database: SharedDatabase,
-}
-```
-
-`begin` builds the repositories of the new unit of work and gives them to the application's
-[registry](../application/units_of_work.md#the-registry):
-
-```rust,ignore
-impl UnitOfWorkFactory for InMemoryFactory {
-    type Error = RepositoryError;
-    type Registry = Registry;
-
-    fn begin(&self) -> Box<dyn UnitOfWork<Error = RepositoryError, Registry = Registry>> {
-        let staged = Rc::new(RefCell::new(Vec::new()));
-
-        let database = Arc::clone(&self.database);
-        let read_accounts: ReadRepositoryFactory<AccountSnapshot> = Box::new(move || {
-            Box::new(AccountReader {
-                database: Arc::clone(&database),
-            })
-        });
-        let write_accounts: SharedWriteRepository<AccountSnapshot> =
-            Rc::new(RefCell::new(AccountWriter {
-                staged: Rc::clone(&staged),
-            }));
-
-        Box::new(InMemoryUnitOfWork {
-            database: Arc::clone(&self.database),
-            registry: Registry::new(read_accounts, write_accounts),
-            staged,
-            actions: RefCell::new(Vec::new()),
-        })
-    }
-}
-```
-
-- Every read repository reads the committed storage, so it does not see the changes of its unit of
-  work that have not been committed yet.
-- The write repository shares the staged writes with its unit of work, which applies them on commit.
-
-With an actual database, `begin` opens a database transaction and gives it to the write repositories,
-while the read repositories use their own connections.
-
-The application only ever sees the factory as a
-`dyn UnitOfWorkFactory<Error = RepositoryError, Registry = Registry>`:
-
-```rust,ignore
-let factory: Factory = Arc::new(InMemoryFactory::default());
-```
-
-[`UnitOfWork`]: https://docs.rs/croisiere/latest/croisiere/application/trait.UnitOfWork.html
-[`UnitOfWorkFactory`]: https://docs.rs/croisiere/latest/croisiere/application/trait.UnitOfWorkFactory.html
+Updates and deletes must check identity and `version = incoming_version - 1` in the write itself.
+A zero affected-row count is a conflict that must fail the transaction, undoing earlier writes too.
+An existence check only decides insert versus update; it cannot replace this concurrency check.
+See [checking versions](./repositories.md#checking-versions).

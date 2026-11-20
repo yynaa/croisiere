@@ -1,3 +1,9 @@
+//! Illustrative notification job, separate from the binary's request flow.
+//!
+//! The job drains a supplied channel and returns follow-up events. Its caller
+//! is responsible for feeding that channel and publishing the returned events.
+//! The binary does not construct or schedule this service.
+
 use std::convert::Infallible;
 
 use croisiere::application::{EventService, Job};
@@ -5,12 +11,15 @@ use crossbeam_channel::Receiver;
 
 use crate::{
     application::events::{AppEvent, Envelope},
-    domain::aggregates::CounterEvent,
+    domain::{DomainEvent, aggregates::CounterEvent},
 };
 
-/// Turns every counter increment read from the bus into a notification,
-/// keeping the actor that caused it.
+/// Turns queued counter increments into notification events with the same actor.
+///
+/// Ignores other events and processes only those available when polled. It
+/// returns notification data without delivering messages or sending bus events.
 pub struct IncrementNotifier {
+    /// Input queue supplied by the service's caller.
     pub bus: Receiver<Envelope>,
 }
 
@@ -25,12 +34,14 @@ impl Job for IncrementNotifier {
             .bus
             .try_iter()
             .filter_map(|Envelope { actor, event }| match event {
-                AppEvent::Counter(CounterEvent::Incremented { name }) => Some(Envelope {
-                    event: AppEvent::Notification {
-                        message: format!("{name} was incremented by {actor}"),
-                    },
-                    actor,
-                }),
+                AppEvent::Domain(DomainEvent::Counter(CounterEvent::Incremented { name })) => {
+                    Some(Envelope {
+                        event: AppEvent::Notification {
+                            message: format!("{name} was incremented by {actor}"),
+                        },
+                        actor,
+                    })
+                }
                 _ => None,
             })
             .collect())

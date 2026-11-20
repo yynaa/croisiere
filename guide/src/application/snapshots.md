@@ -9,6 +9,11 @@ to save it, and a snapshot back into an aggregate to work on it.
 
 In `croisiere`, snapshots are described by the [`Snapshot`] trait.
 
+A snapshot represents one aggregate, even when infrastructure stores its data across several
+tables. Keep table-specific DTO composition in infrastructure; see
+[one snapshot across multiple tables](../infrastructure/dtos.md#one-snapshot-across-multiple-tables)
+for the two composition approaches.
+
 ## Declaring a snapshot
 
 Derive [`Snapshot`] on a struct or an enum, and give it the aggregate it is a snapshot of with the
@@ -81,27 +86,30 @@ Turning a snapshot back into an aggregate can fail: stored data may no longer sa
 rules, for example after those rules changed, or if the storage was edited by hand. Implement
 [`TryFrom`] on the aggregate, which gives the snapshot [`TryInto`]:
 
-```rust,ignore
-#[derive(Debug)]
-pub struct InvalidSnapshot;
+> [!TIP]
+> **Use `DomainError` as the snapshot-to-aggregate conversion error.** Restoration should only
+> assemble domain objects and delegate validation to them. If it needs another error type,
+> check whether domain logic has leaked into the application layer. Keep validation rules and
+> their errors in the domain, and propagate them through the conversion with `?`.
 
+For an aggregate with a domain-defined `restore` function:
+
+```rust,ignore
 impl TryFrom<AccountSnapshot> for AccountAggregate {
-    type Error = InvalidSnapshot;
+    type Error = DomainError;
 
     fn try_from(snapshot: AccountSnapshot) -> Result<Self, Self::Error> {
-        if snapshot.owner.is_empty() || snapshot.cents < 0 {
-            return Err(InvalidSnapshot);
-        }
-        Ok(Self::builder()
-            .root(Account { id: snapshot.id, owner: snapshot.owner })
-            .balance(Balance { cents: snapshot.cents })
-            .build())
+        Ok(Self::restore(snapshot.id, snapshot.owner, snapshot.cents)?)
     }
 }
 ```
 
-The [aggregate's builder](../domain/aggregates.md#building-an-aggregate) is the convenient way to
-assemble it.
+The domain's `restore` function constructs validated value objects, checks rules involving the
+aggregate's state and assembles it using the
+[aggregate's builder](../domain/aggregates.md#building-an-aggregate). Unlike creating a new account,
+restoring an existing one should not emit an account-opened event. For aggregates whose rules are
+fully enforced by their value objects, the conversion can construct those values with `try_into()?`
+and assemble them directly; it still returns `DomainError`.
 
 ## Filters and sorters
 

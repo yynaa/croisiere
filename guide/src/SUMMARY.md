@@ -1,10 +1,12 @@
 # Summary
 
 - [Sailing on a croisière](./introduction.md)
+  - [General Application Tips](./general_application_tips.md)
 - [Deep Water: Domain](./domain.md)
   - [Value Objects](./domain/value_objects.md)
   - [Entities](./domain/entities.md)
   - [Aggregates](./domain/aggregates.md)
+  - [Domain Services](./domain/services.md)
 - [Surface Water: Application](./application.md)
   - [Snapshots](./application/snapshots.md)
   - [Repositories](./application/repositories.md)
@@ -18,3 +20,5 @@
   - [Units of Work](./infrastructure/units_of_work.md)
   - [In-memory Storage](./infrastructure/in_memory.md)
 - [Cruise: Presentation](./presentation.md)
+- [Examples](./examples.md)
+  - [Counter Example](./examples/counter_example.md)
