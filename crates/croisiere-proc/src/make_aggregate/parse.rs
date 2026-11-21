@@ -20,7 +20,7 @@ impl Parse for AggregateInput {
             let attrs = input.call(Attribute::parse_outer)?;
             let name: Ident = input.parse()?;
             let fields = parse_block(input)?;
-            let root = RootAttrs::from_attrs(&attrs, &name)?;
+            let root = RootAttrs::from_attrs(&attrs)?;
             roots.push(NodeDef {
                 name,
                 alias: root.alias,
@@ -43,9 +43,9 @@ pub struct NodeDef {
     /// Full name of the generated aggregate, when set with `#[alias]`.
     pub alias: Option<Ident>,
     pub fields: Vec<FieldDef>,
-    /// `Aggregate::Event`, from `#[emits = EventType]`.
+    /// `Aggregate::Event`, from `#[emits = EventType]`, or `NothingEvent`.
     pub event: Type,
-    /// `Aggregate::Error`, from `#[fails = ErrorType]`.
+    /// `Aggregate::Error`, from `#[fails = ErrorType]`, or `Infallible`.
     pub error: Type,
     /// Whether builders are generated; turned off with `#[no_builder]`.
     pub builder: bool,
@@ -86,7 +86,7 @@ struct RootAttrs {
 }
 
 impl RootAttrs {
-    fn from_attrs(attrs: &[Attribute], root: &Ident) -> syn::Result<Self> {
+    fn from_attrs(attrs: &[Attribute]) -> syn::Result<Self> {
         let mut alias = None;
         let mut event = None;
         let mut error = None;
@@ -110,16 +110,12 @@ impl RootAttrs {
                 ));
             }
         }
-        let missing = |what: &str| {
-            syn::Error::new(
-                root.span(),
-                format!("missing `#[{what} = ...]` on the aggregate root `{root}`"),
-            )
-        };
         Ok(Self {
             alias,
-            event: event.ok_or_else(|| missing("emits"))?,
-            error: error.ok_or_else(|| missing("fails"))?,
+            // Left out, the aggregate emits `NothingEvent` and fails with
+            // `Infallible`.
+            event: event.unwrap_or_else(|| syn::parse_quote!(::croisiere::domain::NothingEvent)),
+            error: error.unwrap_or_else(|| syn::parse_quote!(::core::convert::Infallible)),
             no_builder,
         })
     }

@@ -1,5 +1,0 @@
-error: missing `#[fails = ...]` on the aggregate root `A`
-  --> tests/ui/make_aggregate/missing_fails.rs:14:5
-   |
-14 |     A
-   |     ^

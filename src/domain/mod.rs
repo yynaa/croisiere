@@ -9,6 +9,7 @@ mod value_object;
 pub use aggregate::aggregate_functions;
 pub use aggregate::make_aggregate;
 pub use aggregate::Aggregate;
+pub use aggregate::NothingEvent;
 pub use entity::Entity;
 pub use service::domain_service_functions;
 pub use service::DomainService;

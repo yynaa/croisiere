@@ -11,8 +11,8 @@ block marked with [`#[aggregate_functions]`](#aggregate-functions).
 
 ## Declaring an aggregate
 
-Give [`make_aggregate!`] the root, the events the aggregate emits, the errors it fails with, and the
-parts it is made of:
+Give [`make_aggregate!`] the root and the parts it is made of. The events the aggregate emits and
+the errors it fails with are set with `#[emits]` and `#[fails]`, and are optional:
 
 ```rust,ignore
 use croisiere::domain::{Entity, ValueObject, make_aggregate};
@@ -66,9 +66,8 @@ optional.
 
 ### Events and errors
 
-Every aggregate must have `#[emits = EventType]` and `#[fails = ErrorType]` before its root. They
-become [`Aggregate::Event`] and [`Aggregate::Error`], and are used by the
-[aggregate functions](#aggregate-functions):
+`#[emits = EventType]` and `#[fails = ErrorType]` before a root become [`Aggregate::Event`] and
+[`Aggregate::Error`], and are used by the [aggregate functions](#aggregate-functions):
 
 ```rust,ignore
 #[derive(Debug, Clone)]
@@ -82,6 +81,16 @@ pub enum AccountError {
     EmptyOwner,
     InvalidAmount,
 }
+```
+
+Both attributes are optional. An aggregate without `#[emits]` emits
+[`NothingEvent`](https://docs.rs/croisiere/latest/croisiere/domain/struct.NothingEvent.html), and one
+without `#[fails]` fails with [`Infallible`]: its functions emit nothing and never fail, which suits
+a read-only aggregate.
+
+```rust,ignore
+make_aggregate!(Counter { balance: Balance });
+// impl Aggregate for CounterAggregate { type Event = NothingEvent; type Error = Infallible; }
 ```
 
 ### Nested parts

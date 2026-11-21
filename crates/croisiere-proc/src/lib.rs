@@ -87,10 +87,23 @@ use syn::parse_macro_input;
 ///
 /// # Events and errors
 ///
-/// Every root must have `#[emits = EventType]` and `#[fails = ErrorType]`
-/// attributes before it. They become `Aggregate::Event` and
-/// `Aggregate::Error`, which `#[aggregate_functions]` uses for
-/// `ActionResult` and `CreationResult`.
+/// `#[emits = EventType]` and `#[fails = ErrorType]` before a root become
+/// `Aggregate::Event` and `Aggregate::Error`, which `#[aggregate_functions]`
+/// uses for `ActionResult` and `CreationResult`. Both are optional: an
+/// aggregate without `#[emits]` emits [`NothingEvent`] and one without
+/// `#[fails]` fails with [`Infallible`], so a read-only aggregate needs neither:
+///
+/// ```ignore
+/// make_aggregate!(Counter { data: CounterData });
+/// // impl Aggregate for CounterAggregate {
+/// //     const NAME: &'static str = "CounterAggregate";
+/// //     type Event = croisiere::domain::NothingEvent;
+/// //     type Error = core::convert::Infallible;
+/// // }
+/// ```
+///
+/// [`NothingEvent`]: croisiere::domain::NothingEvent
+/// [`Infallible`]: core::convert::Infallible
 ///
 /// # Custom aggregate name
 ///

@@ -12,12 +12,19 @@ pub trait Aggregate: Debug + Default {
     /// [`make_aggregate`] (or to the name given with `#[alias]`).
     const NAME: &'static str;
     /// Error returned by the aggregate's functions, set with `#[fails]` in
-    /// [`make_aggregate`].
+    /// [`make_aggregate`], or [`Infallible`] when left out.
     type Error;
     /// Events emitted by the aggregate's functions, set with `#[emits]` in
-    /// [`make_aggregate`].
+    /// [`make_aggregate`], or [`NothingEvent`] when left out.
     type Event;
 }
+
+/// Event emitted by aggregates declared without `#[emits]` in
+/// [`make_aggregate`]: their functions emit nothing.
+///
+/// [`make_aggregate`]: crate::domain::make_aggregate
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct NothingEvent;
 
 // The aggregate DSL itself lives in `croisiere-proc`; it is re-exported here so
 // users can access it as `croisiere::domain::make_aggregate`.

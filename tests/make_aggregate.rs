@@ -4,7 +4,8 @@
 //! Most checks are static: a test compiles only if the generated types have
 //! the expected names, fields and impls.
 
-use croisiere::domain::Aggregate;
+use croisiere::domain::{Aggregate, NothingEvent};
+use std::convert::Infallible;
 
 /// Compiles only if `A` is an aggregate with these event and error types.
 fn assert_aggregate_types<A: Aggregate<Event = E, Error = F>, E, F>() {}
@@ -151,6 +152,25 @@ mod alias {
     fn root_without_fields() {
         let _: Plain = PlainAggregate::default().root;
         assert_eq!(PlainAggregate::NAME, "PlainAggregate");
+    }
+}
+
+// --- Default events and errors -----------------------------------------------
+
+mod defaults {
+    use super::*;
+
+    domain_types!(Account, Data);
+
+    // `#[emits]` and `#[fails]` are optional: left out, the aggregate emits
+    // `NothingEvent` and fails with `Infallible`.
+    croisiere::domain::make_aggregate!(
+        Account { #[rootless] data: Data { value: u32 } }
+    );
+
+    #[test]
+    fn omitted_emits_and_fails_default_to_nothing_event_and_infallible() {
+        assert_aggregate_types::<AccountAggregate, NothingEvent, Infallible>();
     }
 }
 
