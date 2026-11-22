@@ -298,5 +298,11 @@ pub trait UnitOfWorkFactory: Sync + Send {
     type Registry;
 
     /// Starts a new, empty unit of work.
-    fn begin(&self) -> Box<dyn UnitOfWork<Error = Self::Error, Registry = Self::Registry>>;
+    ///
+    /// Returns the failure that prevented it — for example a storage pool that
+    /// could not provide a connection. The unit of work is returned only on
+    /// success, so no partially initialized state is left behind.
+    fn begin(
+        &self,
+    ) -> Result<Box<dyn UnitOfWork<Error = Self::Error, Registry = Self::Registry>>, Self::Error>;
 }

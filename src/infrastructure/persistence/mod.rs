@@ -14,14 +14,23 @@
 //!
 //! The optional `in_memory` backend supports snapshot rollback on action
 //! errors. Callers must serialize writes during commit. It is enabled by
-//! the default `in-memory` feature.
+//! the default `in-memory` feature. The optional `diesel-sqlite` and
+//! `diesel-pg` backends run each commit inside one Diesel transaction on a
+//! pooled connection, so an action error rolls the whole batch back.
 
 mod dto;
 #[cfg(feature = "in-memory")]
 #[cfg_attr(docsrs, doc(cfg(feature = "in-memory")))]
 pub mod in_memory;
+#[cfg(feature = "diesel-sqlite")]
+#[cfg_attr(docsrs, doc(cfg(feature = "diesel-sqlite")))]
+pub mod diesel_sqlite;
+#[cfg(feature = "diesel-pg")]
+#[cfg_attr(docsrs, doc(cfg(feature = "diesel-pg")))]
+pub mod diesel_pg;
 mod repository;
 
+pub use dto::BackendDTO;
 pub use dto::DTO;
 pub use dto::DTODelete;
 pub use dto::DTOInsert;

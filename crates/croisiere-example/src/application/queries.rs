@@ -55,7 +55,7 @@ impl Query for AppQuery {
 /// The query neither registers writes nor commits; its unit of work is dropped
 /// when handling finishes. Query responses do not include concurrency versions.
 pub fn ask(factory: &Factory, query: AppQuery) -> Result<QueryResponse, AppError> {
-    query.handle(factory.begin())
+    query.handle(factory.begin()?)
 }
 
 /// Lists counters, optionally sorted and paginated.

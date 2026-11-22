@@ -38,10 +38,13 @@ inside a row remains shared if its clone shares it.
 
 ## DTO metadata and connections
 
-For operations that use the default backend connection and error, implement `InMemoryDTO`:
+For operations that use the default backend connection and error, implement `BackendDTO` and the
+`InMemoryDTO` marker:
 
 ```rust,ignore
-use croisiere::infrastructure::persistence::in_memory::InMemoryDTO;
+use std::sync::{Mutex, Weak};
+
+use croisiere::infrastructure::persistence::{BackendDTO, in_memory::{InMemoryDTO, InMemoryDatabase}};
 
 #[derive(Debug, Clone)]
 struct AccountRow {
@@ -50,20 +53,26 @@ struct AccountRow {
     version: u128,
 }
 
-impl InMemoryDTO for AccountRow {
+impl BackendDTO for AccountRow {
     const NAME: &'static str = "accounts";
+    type ConnectionData = Weak<Mutex<InMemoryDatabase>>;
+    type Error = InMemoryRepositoryError;
 }
+
+impl InMemoryDTO for AccountRow {}
 ```
 
 This supplies a blanket `DTO` implementation with:
 
 - `ConnectionData = Weak<Mutex<InMemoryDatabase>>`;
 - `Error = InMemoryRepositoryError`;
-- `NAME` forwarded from the marker.
+- `NAME` forwarded from the `BackendDTO` implementation.
 
 It does not implement select, insert, update, delete or snapshot conversions. Implement those for
 your DTO. Do not also implement `DTO` directly on a type implementing `InMemoryDTO`, because the
-implementations would overlap.
+implementations would overlap. Every backend shares one blanket `DTO` implementation over
+`BackendDTO`, so a type can use at most one backend marker: implementing a second backend's marker
+for the same type would conflict.
 
 If you need an application repository error or a connection that also carries the commit gate,
 implement `DTO` directly instead of the marker. The library's `InMemoryConnection` holds the weak
@@ -128,7 +137,7 @@ rollback. See [transaction boundaries](./units_of_work.md#commit-and-rollback) f
 `InMemoryUnitOfWorkFactory<R, E>` owns the database and a commit gate. It returns the library's
 `InMemoryUnitOfWork<R, E>` directly, so the example needs no factory or unit-of-work implementation.
 The factory requires `R: 'static` and `E: From<InMemoryRepositoryError> + 'static` to implement
-`UnitOfWorkFactory`.
+`UnitOfWorkFactory`. Its `begin()` never fails, so it always yields a unit of work.
 
 There are two construction paths:
 

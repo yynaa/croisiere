@@ -90,9 +90,14 @@ Independent factories create independent gates even when they receive the same d
 ## Other storage backends
 
 For a SQL backend or another storage system, implement `UnitOfWork` and `UnitOfWorkFactory` around
-its transaction API. Connections returned by the repositories must participate in that same
-transaction. Execute every action, commit only if all succeed, and roll back on the first error.
+its transaction API. `begin()` is fallible: report the failure that prevented the unit of work — for
+example a connection pool that could not provide a connection. Connections returned by the
+repositories must participate in that same transaction. Execute every action, commit only if all
+succeed, and roll back on the first error.
 The DTO repository blanket implementations stop on errors but do not provide transactions.
+
+The library provides such implementations for SQLite and PostgreSQL: see
+[SQLite storage](./diesel_sqlite.md) and [PostgreSQL storage](./diesel_pg.md).
 
 Updates and deletes must check identity and `version = incoming_version - 1` in the write itself.
 A zero affected-row count is a conflict that must fail the transaction, undoing earlier writes too.

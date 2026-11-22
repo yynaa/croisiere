@@ -28,6 +28,32 @@ pub trait DTO: Debug + Clone {
     type Error;
 }
 
+/// Backend metadata of a storage representation, shared by backend markers.
+///
+/// Backend modules define marker traits pinning [`ConnectionData`](Self::ConnectionData)
+/// and [`Error`](Self::Error) to the backend's types; implementing such a
+/// marker on a `BackendDTO` supplies a blanket [`DTO`] implementation.
+/// Implement [`DTO`] directly instead when the connection carries extra
+/// handles such as a commit gate, or when the application error differs.
+pub trait BackendDTO: Debug + Clone {
+    /// Name identifying this storage representation, forwarded to [`DTO::NAME`].
+    const NAME: &'static str;
+
+    /// Connection or transaction handle used by this DTO's operations.
+    type ConnectionData;
+    /// Failure reported by the underlying storage operations.
+    type Error;
+}
+
+/// Backend markers share this single blanket implementation: overlapping
+/// blanket implementations cannot coexist when several backends are enabled.
+impl<D: BackendDTO> DTO for D {
+    const NAME: &'static str = D::NAME;
+
+    type ConnectionData = D::ConnectionData;
+    type Error = D::Error;
+}
+
 /// Selects DTOs using storage-specific criteria, ordering and pagination.
 ///
 /// The implementation defines how filters combine and what order is used

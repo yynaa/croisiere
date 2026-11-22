@@ -152,9 +152,13 @@ impl<R: 'static, E: From<InMemoryRepositoryError> + 'static> UnitOfWorkFactory
     type Registry = R;
 
     /// Builds a registry and creates an empty unit of work sharing the commit gate.
-    fn begin(&self) -> Box<dyn UnitOfWork<Error = E, Registry = R>> {
+    fn begin(
+        &self,
+    ) -> Result<Box<dyn UnitOfWork<Error = E, Registry = R>>, E> {
         let weak = Arc::downgrade(&self.database);
         let registry = (self.registry_builder)(weak.clone(), self.commit_gate.clone());
-        Box::new(InMemoryUnitOfWork::new(registry, weak).with_commit_gate(self.commit_gate.clone()))
+        Ok(Box::new(
+            InMemoryUnitOfWork::new(registry, weak).with_commit_gate(self.commit_gate.clone()),
+        ))
     }
 }

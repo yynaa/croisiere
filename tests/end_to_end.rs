@@ -426,20 +426,20 @@ impl UnitOfWorkFactory for InMemoryFactory {
     type Error = AppError;
     type Registry = Registry;
 
-    fn begin(&self) -> Uow {
+    fn begin(&self) -> Result<Uow, AppError> {
         let staged = Rc::new(RefCell::new(Vec::new()));
         let accounts = AccountRepository {
             database: Arc::clone(&self.database),
             staged: Rc::clone(&staged),
         };
-        Box::new(InMemoryUnitOfWork {
+        Ok(Box::new(InMemoryUnitOfWork {
             database: Arc::clone(&self.database),
             registry: Registry {
                 accounts: Rc::new(RefCell::new(accounts)),
             },
             staged,
             actions: RefCell::new(Vec::new()),
-        })
+        }))
     }
 }
 
@@ -700,7 +700,7 @@ fn execute<C>(
 where
     C: Command<Context = Uow, Error = AppError>,
 {
-    command.handle(factory.begin())
+    command.handle(factory.begin()?)
 }
 
 fn query<Q>(
@@ -710,7 +710,7 @@ fn query<Q>(
 where
     Q: Query<Context = Uow, Error = AppError>,
 {
-    query.handle(factory.begin())
+    query.handle(factory.begin()?)
 }
 
 fn open(factory: &InMemoryFactory, id: u32, owner: &str, cents: i64) {
@@ -967,8 +967,8 @@ fn concurrent_change_makes_the_later_commit_fail() {
             .unwrap();
         uow.register_action(Box::new(actionable));
     };
-    let first = factory.begin();
-    let second = factory.begin();
+    let first = factory.begin().unwrap();
+    let second = factory.begin().unwrap();
     deposit_on(&first, 10);
     deposit_on(&second, 20);
 
@@ -985,7 +985,7 @@ fn a_failing_write_rolls_back_the_whole_commit() {
     open(&factory, 2, "bob", 0);
 
     // The transfer loads both accounts at version 1 and registers them...
-    let uow = factory.begin();
+    let uow = factory.begin().unwrap();
     Transfer {
         from: 1,
         to: 2,
@@ -1009,7 +1009,7 @@ fn nothing_is_written_until_commit() {
     let factory = InMemoryFactory::default();
     open(&factory, 1, "ada", 500);
 
-    let uow = factory.begin();
+    let uow = factory.begin().unwrap();
     let repository = &uow.registry().accounts;
     let (actionable, _) = load(repository, 1)
         .unwrap()
@@ -1032,7 +1032,7 @@ fn committing_twice_does_not_write_twice() {
     let factory = InMemoryFactory::default();
     open(&factory, 1, "ada", 0);
 
-    let uow = factory.begin();
+    let uow = factory.begin().unwrap();
     act_on_account(&uow, 1, SnapshotAction::Save, |a| a.deposit(10)).unwrap();
     // Actions are consumed by the first commit.
     uow.commit_and_rollback().unwrap();

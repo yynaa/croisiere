@@ -11,6 +11,8 @@ rustdoc-args = ["--cfg", "docsrs"]
 croisiere-proc = { path = "crates/croisiere-proc" }
 crossbeam-channel = { workspace = true }
 thiserror = { workspace = true }
+diesel = { workspace = true, optional = true }
+r2d2 = { workspace = true, optional = true }
 
 [workspace]
 members = ["crates/croisiere-proc", "crates/croisiere-example"]
@@ -21,10 +23,14 @@ quote = "1.0.47"
 proc-macro2 = "1.0.107"
 crossbeam-channel = "0.5.17"
 thiserror = "2.0.21"
+diesel = { version = "2.4.0" }
+r2d2 = "0.8.10"
 
 [dev-dependencies]
 trybuild = "1"
 
 [features]
-default = []
+default = ["diesel-sqlite"]
 in-memory = []
+diesel-sqlite = ["diesel/sqlite", "diesel/r2d2", "dep:r2d2"]
+diesel-pg = ["diesel/postgres", "diesel/r2d2", "dep:r2d2"]

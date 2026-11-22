@@ -79,7 +79,7 @@ pub fn execute(
     command: AppCommand,
 ) -> Result<CommandResponse, AppError> {
     command.handle(CommandContext {
-        uow: factory.begin(),
+        uow: factory.begin()?,
         bus: bus.sender(),
         actor,
     })

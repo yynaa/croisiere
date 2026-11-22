@@ -199,7 +199,7 @@ fn failed_commit_does_not_publish_events() {
         name: "visits".into(),
     }
     .handle(CommandContext {
-        uow: Box::new(RejectCommit(factory.begin())),
+        uow: Box::new(RejectCommit(factory.begin().unwrap())),
         bus: bus.sender(),
         actor: "demo".into(),
     });
@@ -221,7 +221,7 @@ fn publication_failure_is_reported_after_the_data_is_committed() {
         name: "visits".into(),
     }
     .handle(CommandContext {
-        uow: factory.begin(),
+        uow: factory.begin().unwrap(),
         bus: sender,
         actor: "demo".into(),
     });
@@ -233,7 +233,7 @@ fn publication_failure_is_reported_after_the_data_is_committed() {
 fn unique_lookup_distinguishes_missing_unique_and_multiple_matches() {
     let factory = factory();
     let bus = EventBus::default();
-    let mut reader = factory.begin().registry().read_counters();
+    let mut reader = factory.begin().unwrap().registry().read_counters();
     assert!(matches!(
         reader.get_unique(HashSet::new()),
         Err(RepositoryError::NotFound)
@@ -264,7 +264,7 @@ fn unique_lookup_distinguishes_missing_unique_and_multiple_matches() {
 #[test]
 fn unique_lookup_preserves_storage_failures() {
     let factory = factory();
-    let mut reader = factory.begin().registry().read_counters();
+    let mut reader = factory.begin().unwrap().registry().read_counters();
     drop(factory);
 
     assert!(matches!(
@@ -301,7 +301,7 @@ fn commands_report_missing_snapshots_through_repository_error() {
 fn existence_checks_distinguish_missing_matches_and_storage_failures() {
     let factory = factory();
     let bus = EventBus::default();
-    let mut reader = factory.begin().registry().read_counters();
+    let mut reader = factory.begin().unwrap().registry().read_counters();
     assert!(!reader.exists(HashSet::new()).unwrap());
 
     execute(

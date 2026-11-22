@@ -19,6 +19,8 @@
   - [Repositories](./infrastructure/repositories.md)
   - [Units of Work](./infrastructure/units_of_work.md)
   - [In-memory Storage](./infrastructure/in_memory.md)
+  - [SQLite Storage](./infrastructure/diesel_sqlite.md)
+  - [PostgreSQL Storage](./infrastructure/diesel_pg.md)
 - [Cruise: Presentation](./presentation.md)
 - [Examples](./examples.md)
   - [Counter Example](./examples/counter_example.md)

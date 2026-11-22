@@ -24,7 +24,7 @@ use infrastructure::persistence::{CounterFactory, counter_factory};
 #[test]
 fn owned_readers_see_committed_data_and_outlive_the_unit_of_work() {
     let factory: CounterFactory = counter_factory();
-    let uow = factory.begin();
+    let uow = factory.begin().unwrap();
     let mut first_reader = uow.registry().read_counters();
     let mut second_reader = uow.registry().read_counters();
     let writer = uow.registry().write_counters();
@@ -48,7 +48,7 @@ fn owned_readers_see_committed_data_and_outlive_the_unit_of_work() {
 #[test]
 fn pending_actions_cannot_keep_the_registry_writer_alive() {
     let factory = counter_factory();
-    let uow = factory.begin();
+    let uow = factory.begin().unwrap();
     let mut reader = uow.registry().read_counters();
     let (counter, _) = CounterAggregate::create("visits".to_owned()).unwrap();
     let mut action = VersionedSnapshot::<CounterSnapshot>::assemble(counter, 0)

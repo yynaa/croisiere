@@ -45,7 +45,7 @@ pub type Uow = Box<dyn UnitOfWork<Error = RepositoryError, Registry = Registry>>
 
 The request then reaches the repositories through its [registry](./units_of_work.md#the-registry).
 
-Alternatively, pass the shared `Factory` as the context and call `factory.begin()` inside `handle`.
+Alternatively, pass the shared `Factory` as the context and call `factory.begin()?` inside `handle`.
 A read-only query uses the registry without registering actions or committing. Both approaches keep
 storage construction in infrastructure.
 
@@ -308,7 +308,7 @@ where
     C: Command<Context = CommandContext>,
 {
     command.handle(CommandContext {
-        uow: factory.begin(),
+        uow: factory.begin()?,
         bus: bus.sender(),
     })
 }
@@ -317,7 +317,7 @@ pub fn ask<Q>(factory: &Factory, query: Q) -> Result<Q::Response, Q::Error>
 where
     Q: Query<Context = Uow>,
 {
-    query.handle(factory.begin())
+    query.handle(factory.begin()?)
 }
 
 let response = execute(&factory, &bus, Deposit { id: 1, cents: 500 })?;

@@ -131,7 +131,7 @@ use croisiere::application::{SnapshotAction, UnitOfWorkFactory};
 pub type Factory = Arc<dyn UnitOfWorkFactory<Error = RepositoryError, Registry = Registry>>;
 
 pub fn deposit(factory: &Factory, id: u32, cents: i64) -> Result<Vec<AppEvent>, AppError> {
-    let uow = factory.begin();
+    let uow = factory.begin()?;
     let registry = uow.registry();
 
     let snapshot = registry
