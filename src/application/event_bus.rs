@@ -84,6 +84,14 @@ pub struct EventBusSender<T> {
     subscribers: Weak<Mutex<Vec<Sender<T>>>>,
 }
 
+/// Error returned by [`EventBusSender::send`] after the bus's shared state has
+/// been released.
+///
+/// Alias for [`crossbeam_channel::SendError`]. The original, unsent event can be
+/// recovered from the error's public tuple field `.0`.
+/// Sending to a live bus with no readers does not produce this error.
+pub type EventBusSendError<T> = SendError<T>;
+
 impl<T: Clone> EventBusSender<T> {
     /// Clones `event` into every active subscriber's queue.
     ///
@@ -94,15 +102,16 @@ impl<T: Clone> EventBusSender<T> {
     ///
     /// # Errors
     ///
-    /// Returns [`SendError`] containing the original event if the bus has been
-    /// dropped and its shared state has been released.
+    /// Returns `EventBusSendError` (an alias for [`SendError`]) containing the
+    /// original event if the bus has been dropped and its shared state has been
+    /// released.
     ///
     /// # Panics
     ///
     /// Panics if the subscription mutex is poisoned or `T::clone` panics. A
     /// panic while cloning can leave the event delivered to only some readers
     /// and poisons the mutex.
-    pub fn send(&self, event: T) -> Result<(), SendError<T>> {
+    pub fn send(&self, event: T) -> Result<(), EventBusSendError<T>> {
         let Some(subscribers) = self.subscribers.upgrade() else {
             return Err(SendError(event));
         };

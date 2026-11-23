@@ -34,6 +34,7 @@ assert_eq!(audit.try_recv().unwrap(), event);
 | `EventBus<T>` | Owns the subscriptions and creates readers and senders. |
 | `EventBusSender<T>` | Sends an event to every active reader. |
 | `EventBusReader<T>` | Reads one subscription's queued events without waiting. |
+| `EventBusSendError<T>` | Contains the original event when sending fails after the bus shuts down. |
 
 `send` requires `T: Clone`, because each reader receives its own clone. The event type belongs to the
 application: it can be an enum covering several aggregates, or an envelope carrying an actor and the
@@ -88,7 +89,9 @@ assert_eq!(error.0, "closed");
 Senders hold weak references to the bus. Keeping senders or readers alive does not keep its
 subscriptions connected. Dropping the bus releases the subscriptions once any send already in
 progress finishes. Readers can drain their queues and then receive `TryRecvError::Disconnected`.
-Later sends fail with `crossbeam_channel::SendError<T>`, which contains the original event.
+Later sends fail with `EventBusSendError<T>`, an alias for `crossbeam_channel::SendError<T>`.
+Its public tuple field `.0` contains the original, unsent event, as shown above. A live bus with no
+readers still accepts sends and does not return this error.
 
 Dropping a reader discards its queued events; a subsequent send removes its disconnected subscription.
 An event service receives its own emitted events too, so its handlers must avoid endless cycles.
