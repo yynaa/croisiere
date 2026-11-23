@@ -11,6 +11,7 @@ pub use cqrs::Command;
 pub use cqrs::Query;
 pub use event_bus::EventBus;
 pub use event_bus::EventBusReader;
+pub use event_bus::EventBusSendError;
 pub use event_bus::EventBusSender;
 pub use jobs::EventService;
 pub use jobs::Job;
