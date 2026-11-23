@@ -29,24 +29,24 @@ pub trait Snapshot: Debug + Clone + From<Self::Aggregate> + TryInto<Self::Aggreg
 ///
 /// Repositories take filters as a [`HashSet`](std::collections::HashSet),
 /// hence the [`Hash`] bound. Implement it with `#[derive(Filter)]`.
-pub trait Filter: Hash {}
+pub trait Filter: Hash + Clone {}
 
 /// [`Filter`] for snapshots that cannot be filtered.
 ///
 /// Default `Snapshot::Filter` when `#[snapshot(...)]` sets no `filter`.
-#[derive(Hash, Filter)]
+#[derive(Hash, Clone, Filter)]
 pub struct EmptyFilter;
 
 /// Ordering for snapshots returned by a
 /// [`ReadRepository`](crate::application::ReadRepository).
 ///
 /// Implement it with `#[derive(Sorter)]`.
-pub trait Sorter {}
+pub trait Sorter: Clone {}
 
 /// [`Sorter`] for snapshots that cannot be sorted.
 ///
 /// Default `Snapshot::Sorter` when `#[snapshot(...)]` sets no `sorter`.
-#[derive(Sorter)]
+#[derive(Clone, Sorter)]
 pub struct EmptySorter;
 
 pub use croisiere_proc::{Filter, Snapshot, Sorter};

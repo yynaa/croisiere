@@ -61,9 +61,9 @@ impl<D: BackendDTO> DTO for D {
 /// it does not filter, sort or paginate the returned DTOs itself.
 pub trait DTOSelect: DTO {
     /// Storage criteria, converted from each snapshot's filters by the repository adapter.
-    type Filter: Eq + Hash;
+    type Filter: Eq + Hash + Clone;
     /// Storage ordering, converted from each snapshot's sorter by the repository adapter.
-    type Sorter;
+    type Sorter: Clone;
 
     /// Returns matching DTOs in the requested order and page.
     ///
