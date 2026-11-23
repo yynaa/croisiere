@@ -3,6 +3,7 @@ use std::{cell::RefCell, collections::HashSet, error::Error, fmt, rc};
 use crate::{application::Snapshot, domain::Aggregate};
 
 /// Page of results to return from a [`ReadRepository`].
+#[derive(Debug, Clone, Copy)]
 pub struct Pagination {
     /// Maximum number of snapshots to return.
     pub limit: usize,
